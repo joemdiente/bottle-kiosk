@@ -30,7 +30,7 @@
 #ifdef ESP32
   #include <TelnetClient.h>
   #include "lan_definition.h"
-  #include <SPIFFS.h>
+  #include <LittleFS.h>
   #include <Update.h>
   #include <WiFi.h>
 #else
@@ -44,9 +44,9 @@
   #include <flash_hal.h>
 #endif
 
-
+#include <LittleFS.h>
 #include <EEPROM.h>
-#include "FS.h"
+#include <FS.h>
 #include <base64.h>
 #include <LiquidCrystal_I2C.h>
 
@@ -189,9 +189,10 @@ String MARQUEE_MESSAGE = "This is marquee";
 void setup () { 
                                 
   Serial.begin (115200);
+  Serial.print("setup");
   EEPROM.begin(512);
-  if(!SPIFFS.begin()){
-    Serial.println("An Error has occurred while mounting SPIFFS");
+  if(!LittleFS.begin()){
+    Serial.println("An Error has occurred while mounting LittleFS");
     return;
   }  
   populateSystemConfiguration(); 
@@ -394,7 +395,7 @@ void handleFileUploadStream(){
             isFileSystem = true;
             backupSystemConfig();
             #ifdef ESP32
-              if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {
+              if (!Update.begin(LittleFS.totalBytes(), U_LittleFS)) {
                   Serial.println("Upload filesystem start failed");
                   hasUploadError = true;
               }
@@ -809,10 +810,10 @@ bool handleFileRead(String path){  // send the right file to the client (if it e
   if(path.endsWith("/")) path += "index.html";           // If a folder is requested, send the index file
   String contentType = getContentType(path);             // Get the MIME type
   String pathWithGz = path + ".gz";
-  if(SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)){  // If the file exists, either as a compressed archive, or normal
-    if(SPIFFS.exists(pathWithGz))                          // If there's a compressed version available
+  if(LittleFS.exists(pathWithGz) || LittleFS.exists(path)){  // If the file exists, either as a compressed archive, or normal
+    if(LittleFS.exists(pathWithGz))                          // If there's a compressed version available
       path += ".gz";                                         // Use the compressed version
-    File file = SPIFFS.open(path, "r");                    // Open the file
+    File file = LittleFS.open(path, "r");                    // Open the file
     size_t sent = server.streamFile(file, contentType);    // Send it to the client
     file.close();                                          // Close the file again
     Serial.println(String("\tSent file: ") + path);
@@ -824,8 +825,8 @@ bool handleFileRead(String path){  // send the right file to the client (if it e
 
 bool handleFileWrite(String path, String content){  // send the right file to the client (if it exists)
   Serial.println("handleFileWrite: " + path);
-  if(SPIFFS.exists(path)){
-    File file = SPIFFS.open(path, "w");
+  if(LittleFS.exists(path)){
+    File file = LittleFS.open(path, "w");
     int bytesWritten = file.print(content);
     if(bytesWritten <= 0){
       return false;
@@ -840,8 +841,8 @@ bool handleFileWrite(String path, String content){  // send the right file to th
 
 String readFile(String path){ 
   String result;
-  if(SPIFFS.exists(path)){
-    File file = SPIFFS.open(path, "r");
+  if(LittleFS.exists(path)){
+    File file = LittleFS.open(path, "r");
     String content = file.readStringUntil('\n');
     file.close();
     return content;
@@ -1351,7 +1352,7 @@ void populateSystemConfiguration(){
   }
 
   Serial.println("Loading system configuration");
-  String data = readFile("/admin/config/system.data");
+  String data = readFile("/admin/config/system.data"); //Joem: Need to add check here. 
   Serial.print("Data: ");
   Serial.println(data);
   int rowSize = 30;
