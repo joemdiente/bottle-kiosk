@@ -2,8 +2,8 @@
 #ifndef defines_h
 #define defines_h
 
-#if !(ESP32)
-  #error This code is intended to run on the ESP32 platform! Please check your Tools->Board setting.
+#ifndef ESP32
+#error This code is intended to run on the ESP32 platform! Please check your Tools->Board setting.
 #endif
 
 #define DEBUG_ETHERNET_WEBSERVER_PORT       Serial
