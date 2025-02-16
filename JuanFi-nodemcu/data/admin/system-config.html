@@ -223,7 +223,7 @@ h2 {
 </head>
 <body onload="openDashboard(this)">
 <div class="main-container">
-<h2>JuanFi Admin Console</h2>
+<h2>Sapientia Wifi Admin Console</h2>
 
 <div class="topnav" id="myTopnav">
 
@@ -258,15 +258,15 @@ function myFunction() {
 <div id="Dashboard" class="tabcontent">
 	<center>
 	<div class="panel">
-		<span class="title">Total Sales</span>
-		<p id="lifeCoinCount">0</p>
+		<span class="title">Total Bottles</span>
+		<p id="lifeBottleCount">0</p>
 		<button onClick="resetStats('lifeTimeCount')" class="accordion">RESET</button>
 	</div>
 	
 	<div class="panel">
-		<span class="title">Current Sales</span>
-		<p id="coinCount">0</p>
-		<button onClick="resetStats('coinCount')" class="accordion">RESET</button>
+		<span class="title">Current Bottles</span>
+		<p id="bottleCount">0</p>
+		<button onClick="resetStats('bottleCount')" class="accordion">RESET</button>
 	</div>
 	
 	<div class="panel">
@@ -375,97 +375,74 @@ function myFunction() {
 	</div>
 	
 	<div class="panel">
-	<span class="title">Coin slot Setting</span>
-	<label for="email"><b>Coin slot insert wait time(Seconds)</b></label><br>
-    <input type="text" placeholder="Coin slot insert wait time" id="coinSlotWaitTime" required><br>
+	<span class="title">Bottle Dispensing Setting</span>
+	<label for="email"><b>Sensor 1 Assertion value</b></label><br>
+    <input type="text" placeholder="Output value of Sensor 1 if blocked" id="sensor1AssertVal" required><br>
 
-	<label for="email"><b>Coins Slot Abuse Count</b></label><br>
-    <input type="text" placeholder="Coins Slot Abuse Count" id="coinSlotAbuseCount" required><br>
+	<label for="email"><b>Sensor 2 Assertion value</b></label><br>
+    <input type="text" placeholder="Output value of Sensor 2 if blocked" id="sensor2AssertVal" required><br>
 
-	<label for="email"><b>Coins Slot Ban Minutes</b></label><br>
-    <input type="text" placeholder="Coins Slot Ban Minutes" id="coinSlotBanMinutes" required>
+	<label for="email"><b>Sensor 3 Assertion value</b></label><br>
+    <input type="text" placeholder="Output value of Sensor 3 if blocked" id="sensor3AssertVal" required><br>
+
+	<label for="email"><b>Servo 1 Angle when Dispensing Bottle</b></label><br>
+    <input type="text" placeholder="Set value to " id="servo1AngleVal" required><br>
 	</div>
 	
 	<div class="panel">
 	<span class="title">Pin Setting</span>
-	<label for="coinSlotPin"><b>Coinslot Pin</b></label><br>
-    <select name="coinSlotPin" id="coinSlotPin">
-	  <option value="16">D0</option>
+	<label for="sensor1Pin"><b>Sensor 1 Pin</b></label><br>
+    <select name="sensor1Pin" id="sensor1Pin">
+	  <option value="16" selected>D0</option>
+	  <option value="5">D1</option>
+	  <option value="4">D2</option>
 	  <option value="0">D3</option>
-	  <option value="2">D4</option>
-	  <option value="14">D5</option>
-	  <option value="12" selected>D6</option>
-	  <option value="13">D7</option>
-	  <option value="15">D8</option>
-	  <option value="3">RX</option>
-	</select><br>
-	
-	<label for="coinSlotSetPin"><b>Coinslot Set Pin</b></label><br>
-    <select name="coinSlotSetPin" id="coinSlotSetPin">
-	  <option value="16">D0</option>
-	  <option value="2">D3</option>
-	  <option value="0">D4</option>
-	  <option value="14">D5</option>
-	  <option value="12">D6</option>
-	  <option value="13" selected>D7</option>
-	  <option value="15">D8</option>
-	  <option value="3">RX</option>
-	</select><br>
-	
-	<label for="systemReadyLEDPin"><b>System Ready LED Pin</b></label><br>
-    <select name="systemReadyLEDPin" id="systemReadyLEDPin">
-      <option value="16">D0</option>		
-	  <option value="0" selected>D3</option>
-	  <option value="2">D4</option>
 	  <option value="14">D5</option>
 	  <option value="12">D6</option>
 	  <option value="13">D7</option>
 	  <option value="15">D8</option>
-	  <option value="3">RX</option>
 	</select><br>
 	
-	<label for="insertCoinLEDPin"><b>Insert Coin LED Pin</b></label><br>
-    <select name="insertCoinLEDPin" id="insertCoinLEDPin">
-	  <option value="16">D0</option>	
-	  <option value="0">D3</option>
-	  <option value="2" selected>D4</option>
-	  <option value="14">D5</option>
-	  <option value="12">D6</option>
-	  <option value="13">D7</option>
-	  <option value="15">D8</option>
-	  <option value="3">RX</option>
+	<label for="sensor2Pin"><b>Sensor 2 Pin</b></label><br>
+    <select name="sensor2Pin" id="sensor2Pin">
+		<option value="16">D0</option>
+		<option value="5" selected>D1</option>
+		<option value="4">D2</option>
+		<option value="0">D3</option>
+		<option value="14">D5</option>
+		<option value="12">D6</option>
+		<option value="13">D7</option>
+		<option value="15">D8</option>
 	</select><br>
 	
-	<label for="insertCoinBtnPin"><b>Insert Coin Button Pin</b></label><br>
-    <select name="insertCoinBtnPin" id="insertCoinBtnPin">
-	  <option value="16">D0</option>
-	  <option value="0">D3</option>
-	  <option value="2">D4</option>
-	  <option value="14" selected>D5</option>
-	  <option value="12">D6</option>
-	  <option value="13">D7</option>
-	  <option value="15">D8</option>
-	  <option value="3">RX</option>
-	</select>
+	<label for="sensor3Pin"><b>Sensor 3 Pin</b></label><br>
+    <select name="sensor3Pin" id="sensor3Pin">
+		<option value="16">D0</option>
+		<option value="5">D1</option>
+		<option value="4" selected>D2</option>
+		<option value="0">D3</option>
+		<option value="14">D5</option>
+		<option value="12">D6</option>
+		<option value="13">D7</option>
+		<option value="15">D8</option>
+	</select><br>
 	
-	<label for="ledTriggerType"><b>LED Trigger Output(Relay Trigger Type)</b></label><br>
+	<label for="servo1Pin"><b>Servo 1 Pin</b></label><br>
+    <select name="servo1Pin" id="servo1Pin">>
+		<option value="16">D0</option>
+		<option value="5">D1</option>
+		<option value="4">D2</option>
+		<option value="0">D3</option>
+		<option value="14">D5</option>
+		<option value="12">D6</option>
+		<option value="13">D7</option>
+		<option value="15" selected>D8</option>
+	</select><br>
+	
+	<label for="debugLed"><b>Debug LED (Always D4)</b></label><br>
     <select name="ledTriggerType" id="ledTriggerType">
-	  <option value="0">LOW</option>
-	  <option value="1" selected>HIGH</option>
+		<option value="2" selected>D4</option>
 	</select>
-	</div>
-	
-	<div class="panel">
-	<span class="title">LCD Setting</span>
-	<label for="lcdScreen"><b>LCD Screen</b></label><br>
-    <select name="lcdScreen" id="lcdScreen">
-	  <option value="0" selected>None</option>
-	  <option value="1">16x2</option>
-	  <option value="2">20x4</option>
-	</select><br>
-	
-	<label for="welcomeLCDMarquee"><b>Welcome LCD Marquee(only for 20x4)</b></label><br>
-    <input type="text" placeholder="Welcome LCD Marquee" id="welcomeLCDMarquee" maxlength="20" required>
 	</div>
 	
 	<div class="panel">
@@ -488,7 +465,7 @@ function myFunction() {
 		
 	<div class="panel">
 	<span class="title">Internet Check</span>	
-	<label for="checkInternetStatus"><b>Check Internet Status when insert coin</b></label><br>
+	<label for="checkInternetStatus"><b>Always Check Internet Status when Bottle was dispensed?</b></label><br>
     <select name="checkInternetStatus" id="checkInternetStatus">
 	  <option value="1">Yes</option>
 	  <option value="0">No</option>
@@ -556,16 +533,6 @@ function myFunction() {
 	</div>
 </div>
 
-<div id="About" class="tabcontent">
-	<div class="panel">
-	<p>System Version: <span id="appVersionAbout">2.3</span></p>
-	<p>Developer: Ivan Julius Alayan</p>
-	<p>Contributors: Kristoffer D. Samole</p>
-	<p>FB Group: <a href="https://www.facebook.com/groups/1172413279934139"/>Juanfi Group</a> </p>
-	<p>Github: <a href="https://github.com/ivanalayan15/JuanFi"> For issues / request</a> </p>
-	</div>
-</div>
-
 <div id="FirmwareUpdate" class="tabcontent">
 	<div class="container">
 	<div class="panel">
@@ -601,18 +568,18 @@ var version = "2.3";
 
 function saveSystemConfig(){
 
-	var coinSlotPin = $('#coinSlotPin').val();
-	var coinSlotSetPin = $('#coinSlotSetPin').val();
-	var systemReadyLEDPin = $('#systemReadyLEDPin').val();
-	var insertCoinLEDPin = $('#insertCoinLEDPin').val();
-	var insertCoinBtnPin = $('#insertCoinBtnPin').val();
-	
+	var sensor1Pin = $('#sensor1Pin').val();
+	var sensor2Pin = $('#sensor2Pin').val();
+	var sensor3Pin = $('#sensor3Pin').val();
+	var servo1Pin = $('#servo1Pin').val();
+	var debugLedPin = $('#debugLed').val();
+
 	var pinMap = [];
-	pinMap['Coinslot Pin'] = coinSlotPin;
-	pinMap['Coinslot Set Pin'] = coinSlotSetPin;
-	pinMap['System Ready Pin'] = systemReadyLEDPin;
-	pinMap['Insert Coin LED Pin'] = insertCoinLEDPin;
-	pinMap['Insert Coin Button Pin'] = insertCoinBtnPin;
+	pinMap['Sensor 1 Pin'] = sensor1Pin;
+	pinMap['Sensor 2 Pin'] = sensor2Pin;
+	pinMap['Sensor 3 Pin'] = sensor3Pin;
+	pinMap['Servo 1 Pin'] = servo1Pin;
+	pinMap['Debug LED'] = sensor1Pin;
 	
 	if($('#mikrotikPw').val() != $('#confirmMikrotikPw').val()){
 		alert('Mikrotik password is not equal to confirm mikrotik password');
@@ -624,7 +591,7 @@ function saveSystemConfig(){
 		return;
 	}
 	
-	if(!validateCoinSlotPin(pinMap)){
+	if(!validatePin(pinMap)){
 		return;
 	}
 	
@@ -655,17 +622,16 @@ function saveSystemConfig(){
 				$('#mikrotikIp').val(),
 				$('#mikrotikUser').val(),
 				$('#mikrotikPw').val(),
-				$('#coinSlotWaitTime').val(),
+				$('#sensor1AssertVal').val(),
 				$('#adminUser').val(),
 				$('#adminPw').val(),
-				$('#coinSlotAbuseCount').val(),
-				$('#coinSlotBanMinutes').val(),
-				coinSlotPin,
-				coinSlotSetPin,
-				systemReadyLEDPin,
-				insertCoinLEDPin,
-				$('#lcdScreen').val(),
-				insertCoinBtnPin,
+				$('#sensor2AssertVal').val(),
+				$('#sensor3AssertVal').val(),
+				$('#servo1AngleVal').val(),
+				sensor1Pin,
+				sensor2Pin,
+				sensor3Pin,
+				servo1Pin,
 				$('#checkInternetStatus').val(),
 				$('#voucherPrefix').val(),
 				$('#welcomeLCDMarquee').val(),
@@ -694,7 +660,7 @@ function saveSystemConfig(){
 	});
 }
 
-function validateCoinSlotPin(pinMap){
+function validatePin(pinMap){
 	for(var i in pinMap){
 		for(var j in pinMap){
 			if(i != j){
@@ -778,8 +744,8 @@ function openDashboard(evt){
 			$('#upTime').html(secondsToDhms(upTimeSeconds));
 		}, 1000);
 		
-		$('#lifeCoinCount').html(dashboardData[1]);
-		$('#coinCount').html(dashboardData[2]);
+		$('#lifeBottleCount').html(dashboardData[1]);
+		$('#bootleCount').html(dashboardData[2]);
 		$('#customerCount').html(dashboardData[3]);
 		if(dashboardData[4] == "1"){
 			$('#internetStatus').html("Online").css("color","green");	
@@ -858,21 +824,21 @@ function populateSystemConfigFields(data){
 	$('#mikrotikUser').val(configData[4]);
 	$('#mikrotikPw').val(configData[5]);
 	$('#confirmMikrotikPw').val(configData[5]);
-	$('#coinSlotWaitTime').val(configData[6]);
+	$('#sensor1AssertVal').val(configData[6]);
 	$('#adminUser').val(configData[7]);
 	$('#adminPw').val(configData[8]);
 	$('#confirmAdminPw').val(configData[8]);
-	$('#coinSlotAbuseCount').val(configData[9]);
-	$('#coinSlotBanMinutes').val(configData[10]);
-	$('#coinSlotPin').val(configData[11]);
-	$('#coinSlotSetPin').val(configData[12]);
-	$('#systemReadyLEDPin').val(configData[13]);
-	$('#insertCoinLEDPin').val(configData[14]);
-	$('#lcdScreen').val(configData[15]);
-	$('#insertCoinBtnPin').val(configData[16]);
+	$('#sensor2AssertVal').val(configData[9]);
+	$('#sensor3AssertVal').val(configData[10]);
+	$('#sensorlPin').val(configData[11]);
+	$('#sensor2Pin').val(configData[12]);
+	$('#sensor3Pin').val(configData[13]);
+	$('#servo1Pin').val(configData[14]);
+	$('#servo1AngleVal').val(configData[15]);
+	$('#debugLed').val(configData[16]);
 	$('#checkInternetStatus').val(configData[17]);
 	$('#voucherPrefix').val(configData[18]);
-	$('#welcomeLCDMarquee').val(configData[19]);
+	$('#servo1AngleVal').val(configData[19]);
 	$('#setupDoneFlag').val(configData[20]);
 	$('#voucherLoginOption').val(configData[21]);
 	$('#voucherProfile').val(configData[22]);
