@@ -1,6 +1,4 @@
-/*waitTime
- * 
- * JuanFi v2.1
+/*
  * 
  * PisoWifi coinslot system with integration to Mikrotik Hotspot, 
  * Using
@@ -18,22 +16,14 @@
  *   - Promo Rates configuration ( Rates, expiration)
  *   - Dashboard, Sales report
  * 
- * Supported ESP32 Lanbase and ESP8266 
+ * Supported ESP8266 
  * 
- * Created by Ivan Julius Alayan
  * 
 */
 
 //increase always when publishing a new version for tracking
-#define CURRENT_VERSION "2.4"
+#define CURRENT_VERSION "0.1"
 
-#ifdef ESP32
-#include <TelnetClient.h>
-#include "lan_definition.h"
-#include <LittleFS.h>
-#include <Update.h>
-#include <WiFi.h>
-#else
 #include <ESP8266TelnetClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -42,7 +32,6 @@
 #include <DNSServer.h>
 #include <Arduino.h>
 #include <flash_hal.h>
-#endif
 
 #include <LittleFS.h>
 #include <EEPROM.h>
@@ -50,10 +39,93 @@
 #include <base64.h>
 #include <LiquidCrystal_I2C.h>
 
+/* 
+ * Delimiter for rates.data = #
+ * Delimiter for system.data = |
+ */
+
 int TURN_OFF = 0;
 int TURN_ON = 1;
+// Start here.
+// Hardware-related settings
+int SENSOR_1_ASSERT_VAL = 1;
+int SENSOR_2_ASSERT_VAL = 1;
+int SENSOR_3_ASSERT_VAL = 1;
+int SENSOR_1_PIN = D0;
+int SENSOR_2_PIN = D1;
+int SENSOR_3_PIN = D2;
+int SERVO_1_PIN = D8;
+int SERVO_1_CW_VAL = 120;     //servo1ClockwiseVal
+int SERVO_1_ACW_VAL = 120;    //servo1AntiClockwiseVal
+int DEBUGLED_1_PIN = D4;
 
+// Main Sensor-Bottle Logic Variables
+int sensor1Active = 0;
+int sensor2Active = 0;
+int sensor3Active = 0;
 
+//Put here your Mikrotik IP address, and login details
+IPAddress mikrotikRouterIp(192, 168, 100, 1);
+String user = "botefi";
+String pwd = "test";
+String ssid = "Sapientia Wifi VendoMachine";
+String password = "";
+String adminAuth = "";
+String vendorName = "";
+
+//Put here ESP8266 IP Address for Wifi Client
+IPAddress local_IP(192, 168, 10, 15);
+IPAddress gateway(192, 168, 10, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress primaryDNS(192, 168, 10, 1);  // this is optional
+
+//Put here ESP8266 IP Address for Wifi Station 
+IPAddress apIP(172, 217, 28, 1);
+
+WiFiClient client2;
+WiFiClient client;
+ESP8266telnetClient tc(client);
+ESP8266WebServer server(80);
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
+
+// Internal Only
+int CHECK_INTERNET_CONNECTION = 0;
+int IP_ADDRESS_MODE = 0;
+int VOUCHER_LOGIN_OPTION = 0;
+int VOUCHER_VALIDITY_OPTION = 0;
+String VOUCHER_PROFILE = "default";
+String VOUCHER_PREFIX = "P";
+int SETUP_FINISH = 0;
+
+/* EEPROM Layout (??) */
+const int LIFETIME_COIN_COUNT_ADDRESS = 0;
+const int COIN_COUNT_ADDRESS = 5;
+const int CUSTOMER_COUNT_ADDRESS = 10;
+const int RANDOM_MAC_ADDRESS = 15;
+const int BACKUP_CONFIG_LENGTH_INDEX = 20;
+
+//Sensor 1 ISR
+void IRAM_ATTR sensor1Asserted() {
+  if (digitalRead(SENSOR_1_PIN)) {
+    sensor1Active = SENSOR_1_ASSERT_VAL;
+  }
+}
+
+//Sensor 2 ISR
+void IRAM_ATTR sensor2Asserted() {
+  if (digitalRead(SENSOR_2_PIN)) {
+    sensor2Active = SENSOR_2_ASSERT_VAL;
+  }
+}
+
+//Sensor 3 ISR
+void IRAM_ATTR sensor3Asserted() {
+  if (digitalRead(SENSOR_3_PIN)) {
+    sensor3Active = SENSOR_3_ASSERT_VAL;
+  }
+}
+///////////////Unverified Code Below/////////////////////////
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 LiquidCrystal_I2C lcd20x4(0x27, 20, 4);
 
@@ -72,11 +144,7 @@ bool coinExpired = false;
 bool mikrotekConnectionSuccess = false;
 String currentMacAddress = "";
 String currentIpAddress = "";
-#ifdef ESP32
-String HARDWARE_TYPE = "ESP32";
-#else
 String HARDWARE_TYPE = "ESP8266";
-#endif
 
 typedef struct {
   String rateName;
@@ -104,72 +172,10 @@ String ADMIN_USER = "";
 String ADMIN_PW = "";
 
 
-const int LIFETIME_COIN_COUNT_ADDRESS = 0;
-const int COIN_COUNT_ADDRESS = 5;
-const int CUSTOMER_COUNT_ADDRESS = 10;
-const int RANDOM_MAC_ADDRESS = 15;
-const int BACKUP_CONFIG_LENGTH_INDEX = 20;
-
-void ICACHE_RAM_ATTR coinInserted() {
-  if (coinSlotActive) {
-    coin = coin + 1;
-    coinsChange = 1;
-  }
-}
-
-
-int COIN_SELECTOR_PIN = 0;
-int COIN_SET_PIN = 0;
-int INSERT_COIN_LED = 0;
-int SYSTEM_READY_LED = 0;
-int INSERT_COIN_BTN_PIN = 0;
-int CHECK_INTERNET_CONNECTION = 0;
-int LED_TRIGGER_TYPE = 1;
-int IP_ADDRESS_MODE = 0;
-int VOUCHER_LOGIN_OPTION = 0;
-int VOUCHER_VALIDITY_OPTION = 0;
-String VOUCHER_PROFILE = "default";
-String VOUCHER_PREFIX = "P";
-
 int MAX_WAIT_COIN_SEC = 30000;
 int COINSLOT_BAN_COUNT = 0;
 int COINSLOT_BAN_MINUTES = 0;
 int LCD_TYPE = 0;
-int SETUP_FINISH = 0;
-
-
-//put here your raspi ip address, and login details
-IPAddress mikrotikRouterIp(10, 0, 0, 1);
-String user = "pisonet";
-String pwd = "abc123";
-String ssid = "MikrofffffTik-36DA2B";
-String password = "";
-String adminAuth = "";
-String vendorName = "";
-
-
-// static address setting
-IPAddress local_IP(192, 168, 10, 15);
-IPAddress gateway(192, 168, 10, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(192, 168, 10, 1);  // this is optional
-
-
-IPAddress apIP(172, 217, 28, 1);
-
-#ifdef ESP32
-EthernetWebServer server(80);
-EthernetClient client;
-EthernetClient client2;
-telnetClient tc(client);
-#else
-WiFiClient client2;
-WiFiClient client;
-ESP8266telnetClient tc(client);
-ESP8266WebServer server(80);
-const byte DNS_PORT = 53;
-DNSServer dnsServer;
-#endif
 
 const int WIFI_CONNECT_TIMEOUT = 180000;
 const int WIFI_CONNECT_DELAY = 500;
@@ -188,7 +194,11 @@ String MARQUEE_MESSAGE = "This is marquee";
 void setup() {
 
   Serial.begin(115200);
-  Serial.print("setup");
+  Serial.println();
+  Serial.println();
+  Serial.println();
+  delay(300);           // Wait for 'stabilize' serial
+  
   EEPROM.begin(512);
   if (!LittleFS.begin()) {
     Serial.println("An Error has occurred while mounting LittleFS");
@@ -196,33 +206,32 @@ void setup() {
   }
   populateSystemConfiguration();
 
-  pinMode(COIN_SELECTOR_PIN, INPUT_PULLUP);
-  pinMode(INSERT_COIN_LED, OUTPUT);
-  pinMode(SYSTEM_READY_LED, OUTPUT);
-  pinMode(COIN_SET_PIN, OUTPUT);
-  pinMode(INSERT_COIN_BTN_PIN, INPUT_PULLUP);
+  pinMode(SENSOR_1_PIN, INPUT);
+  pinMode(SENSOR_2_PIN, INPUT);
+  pinMode(SENSOR_3_PIN, INPUT);
+  pinMode(DEBUGLED_1_PIN, OUTPUT);
+  pinMode(SERVO_1_PIN, OUTPUT);
 
-#ifdef ESP32
-  initializeLANSetup();
-  initializeLCD();
-#else
-  initializeLCD();
   // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
+
   //for static ip configuration
-  if (IP_ADDRESS_MODE == 1) {
-    Serial.print("using static ip address");
+  if (IP_ADDRESS_MODE == 1) { //Static instead of DHCP
+    Serial.print("[WIFI_STA] Using static ip address");
     Serial.println(local_IP);
     WiFi.config(local_IP, primaryDNS, gateway, subnet);
   }
 
   WiFi.begin(ssid.c_str(), password.c_str());
+
   Serial.println();
   Serial.println();
-  Serial.print("Wait for WiFi, connecting to ");
+  Serial.print("[WIFI_STA] Wait for WiFi, connecting to ");
   Serial.print(ssid);
 
   int second = 0;
+  
+  // Go here if initial setup (SETUP_FINISH) is already done.
   if (SETUP_FINISH == 1) {
     while (second <= WIFI_CONNECT_TIMEOUT) {
       networkConnected = (WiFi.status() == WL_CONNECTED);
@@ -230,20 +239,15 @@ void setup() {
       if (networkConnected) {
         break;
       }
-      digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
       delay(WIFI_CONNECT_DELAY);
-      digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_ON));
       second += WIFI_CONNECT_DELAY;
     }
     currentIpAddress = WiFi.localIP().toString().c_str();
     currentMacAddress = WiFi.macAddress();
-    digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
   } else {
     Serial.println("Initial setup detected, no need to connect to AP");
     networkConnected = false;
   }
-#endif
-
 
   if (networkConnected) {
     Serial.println("");
@@ -253,20 +257,17 @@ void setup() {
     Serial.print("Mac address: ");
     Serial.println(currentMacAddress);
     Serial.println("Connecting.... ");
-    digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
-    digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
-    digitalWrite(COIN_SET_PIN, LOW);
     Serial.print("Attaching interrupt ");
-    attachInterrupt(COIN_SELECTOR_PIN, coinInserted, RISING);
+
+    //Attach Interrupt Here
+    attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2Asserted, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3Asserted, CHANGE);
     loginMirotik();
 
-#ifdef ESP32
-    //nothing
-#else
     if (MDNS.begin("esp8266")) {
       Serial.println("MDNS responder started");
     }
-#endif
 
     server.on("/topUp", topUp);
     server.on("/checkCoin", checkCoin);
@@ -280,55 +281,18 @@ void setup() {
     welcomePrinted = true;
 
   } else {
-#ifdef ESP32
-    //nothing
-#else
     //Soft AP setup
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    WiFi.softAP("JuanFi Setup");
+    WiFi.softAP("Sapientia Wifi Setup");
     //if DNSServer is started with "*" for domain name, it will reply with
     //provided IP to all DNS request
     dnsServer.start(DNS_PORT, "*", apIP);
-#endif
 
     server.onNotFound([]() {
       server.sendHeader("Location", String("/admin"), true);
       server.send(302, "text/plain", "");
     });
-    if (LCD_TYPE > 0) {
-      if (LCD_TYPE == 1) {
-        lcd.clear();
-        if (cableNotConnected) {
-          lcd.setCursor(0, 0);
-          lcd.print("Cable");
-          lcd.setCursor(0, 1);
-          lcd.print("Not connected");
-        } else {
-          lcd.setCursor(0, 0);
-          lcd.print("Initial Setup");
-          lcd.setCursor(0, 1);
-          lcd.print("IP: 172.217.28.1");
-        }
-      } else if (LCD_TYPE == 2) {
-        lcd20x4.clear();
-        lcd20x4.setCursor(0, 0);
-        lcd20x4.print("JuanFi");
-        if (cableNotConnected) {
-          lcd20x4.setCursor(0, 1);
-          lcd20x4.print("Cable not connected");
-          lcd20x4.setCursor(0, 2);
-          lcd20x4.print("Pls check");
-          lcd20x4.setCursor(0, 3);
-          lcd20x4.print("connections");
-        } else {
-          lcd20x4.setCursor(0, 1);
-          lcd20x4.print("Initial Setup");
-          lcd20x4.setCursor(0, 2);
-          lcd20x4.print("IP: 172.217.28.1");
-        }
-      }
-    }
   }
 
   server.on("/admin/api/dashboard", handleAdminDashboard);
@@ -349,30 +313,21 @@ void setup() {
   server.begin();
 
   if (mikrotekConnectionSuccess) {
-    digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_ON));
+    digitalWrite(DEBUGLED_1_PIN, HIGH);
   }
-}
 
+  ///////// End of Code Modification ///////
+}
+/* End of setup() */
 
 boolean hasUploadError = false;
 boolean isFileSystem = true;
 
 void handleFileUploadRequest() {
   if (Update.hasError()) {
-    //when esp32 has sometimes error of not enough space, but actually its uploaded some part succesfully so we will just return success
-    if (isFileSystem && HARDWARE_TYPE == "ESP32") {
-      server.send(200, F("text/html"), "Upload done, with warnings");
-      server.client().stop();
-      ESP.restart();
-    } else {
-      server.send(200, F("text/html"), "Upload has error");
-    }
+    server.send(200, F("text/html"), "Upload has error");
   } else {
-#ifdef ESP32
-    //nothing not avaiable at esp32
-#else
     server.client().setNoDelay(true);
-#endif
     server.send_P(200, PSTR("text/html"), "Upload done");
     delay(100);
     server.client().stop();
@@ -391,19 +346,12 @@ void handleFileUploadStream() {
     if (upload.name == "filesystem") {
       isFileSystem = true;
       backupSystemConfig();
-#ifdef ESP32
-      if (!Update.begin(LittleFS.totalBytes(), U_LittleFS)) {
-        Serial.println("Upload filesystem start failed");
-        hasUploadError = true;
-      }
-#else
       size_t fsSize = ((size_t)&_FS_end - (size_t)&_FS_start);
       close_all_fs();
       if (!Update.begin(fsSize, U_FS)) {  //start with max available size
         Serial.println("Upload filesystem start failed");
         hasUploadError = true;
       }
-#endif
     } else {
       uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
       if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
@@ -437,85 +385,6 @@ void backupSystemConfig() {
   int len = data.length();
   eeWriteInt(BACKUP_CONFIG_LENGTH_INDEX, len);
   eeWriteString(BACKUP_CONFIG_LENGTH_INDEX + 5, data);
-}
-
-#ifdef ESP32
-void initializeLANSetup() {
-  delay(3000);
-  Serial.print("\nStarting ESP32_FS_EthernetWebServer on " + String(BOARD_TYPE));
-  Serial.println(" with " + String(SHIELD_TYPE));
-  Serial.println(ETHERNET_WEBSERVER_VERSION);
-
-  ET_LOGWARN(F("=========== USE_ETHERNET ==========="));
-
-  ET_LOGWARN(F("Default SPI pinout:"));
-  ET_LOGWARN1(F("MOSI:"), MOSI);
-  ET_LOGWARN1(F("MISO:"), MISO);
-  ET_LOGWARN1(F("SCK:"), SCK);
-  ET_LOGWARN1(F("SS:"), SS);
-  ET_LOGWARN(F("========================="));
-
-#ifndef USE_THIS_SS_PIN
-#define USE_THIS_SS_PIN 5  //22    // For ESP32
-#endif
-
-  ET_LOGWARN1(F("ESP32 setCsPin:"), USE_THIS_SS_PIN);
-  Ethernet.init(USE_THIS_SS_PIN);
-  // start the ethernet connection and the server:
-  Serial.println("Ethernet initialized...");
-
-  //Use the ESP32 wifi mac address for our LAN
-  byte mac[6];
-  WiFi.macAddress(mac);
-
-  if (Ethernet.linkStatus() == LinkOFF) {
-    Serial.println("Cable not detected!!!");
-    networkConnected = false;
-    cableNotConnected = true;
-  } else if (IP_ADDRESS_MODE == 1) {  //for static LAN IP
-    Ethernet.begin(mac, local_IP, primaryDNS, gateway, subnet);
-    networkConnected = true;
-  } else if (Ethernet.begin(mac) != 0) {  //for dhcp LAN IP
-    networkConnected = true;
-  } else {
-    networkConnected = false;
-    Serial.println("Cannot connect to dhcp server");
-    Ethernet.begin(mac, apIP, apIP, apIP, IPAddress(255, 255, 255, 0));
-  }
-  // Just info to know how to connect correctly
-  Serial.println(F("========================="));
-  Serial.println(F("Currently Used SPI pinout:"));
-  Serial.print(F("MOSI:"));
-  Serial.println(MOSI);
-  Serial.print(F("MISO:"));
-  Serial.println(MISO);
-  Serial.print(F("SCK:"));
-  Serial.println(SCK);
-  Serial.print(F("SS:"));
-  Serial.println(SS);
-  Serial.println("=========================");
-
-  Serial.print(F("Connected! IP address: "));
-  Serial.println(Ethernet.localIP());
-
-  currentIpAddress = Ethernet.localIP().toString().c_str();
-  //Use the ESP32 wifi mac address for our LAN
-  currentMacAddress = WiFi.macAddress();
-}
-#endif
-
-void initializeLCD() {
-  if (LCD_TYPE > 0) {
-    if (LCD_TYPE == 1) {
-      lcd.init();       // initializing the LCD
-      lcd.backlight();  // Enable or Turn On the backlight
-      lcd.print("Initializing..");
-    } else if (LCD_TYPE == 2) {
-      lcd20x4.init();       // initializing the LCD
-      lcd20x4.backlight();  // Enable or Turn On the backlight
-      lcd20x4.print("Initializing..");
-    }
-  }
 }
 
 void handleNotFound() {
@@ -625,6 +494,7 @@ String eeReadString(int addr, int str_len) {
   return val;
 }
 
+/* Read atleast 4 bytes */
 int eeGetInt(int pos) {
   int val;
   byte* p = (byte*)&val;
@@ -856,33 +726,15 @@ bool checkIfSystemIsAvailable() {
   }
 }
 
-
-
-#ifdef ESP32
-char internetServerAddress[] = "ifconfig.me";  // server address
-int internetCheckPort = 80;
-EthernetHttpClient httpClient(client2, internetServerAddress, internetCheckPort);
-#else
 String INTERNET_CHECK_URL = "http://ifconfig.me";
-#endif
 
 bool hasInternetConnect() {
-
-#ifdef ESP32
-  httpClient.get("/");
-  int statusCode = httpClient.responseStatusCode();
-  String response = httpClient.responseBody();
-  Serial.print("Status code: ");
-  Serial.println(statusCode);
-  Serial.print("Response: ");
-  Serial.println(response);
-  return true;
-#else
   HTTPClient http;
 
   http.begin(client2, INTERNET_CHECK_URL);  //HTTP
   http.addHeader("User-Agent", "curl/7.55.1");
   int httpCode = http.GET();
+
   if (httpCode > 0) {
     const String& payload = http.getString();
     Serial.println("received payload:\n<<");
@@ -890,14 +742,15 @@ bool hasInternetConnect() {
     Serial.println(">>");
     Serial.println("Internet connection detected!");
     http.end();
+
     return true;
   } else {
     Serial.println("Internet connection not detected!");
     Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
     http.end();
+
     return false;
   }
-#endif
 }
 
 void addAttemptToCoinslot() {
@@ -1161,13 +1014,13 @@ void setupCORSPolicy() {
 }
 
 void activateCoinSlot() {
-  digitalWrite(COIN_SET_PIN, HIGH);
+  // digitalWrite(COIN_SET_PIN, HIGH);
   delay(200);
   processCoin = 0;
   acceptCoin = true;
   coinSlotActive = true;
   targetMilis = millis() + MAX_WAIT_COIN_SEC;
-  digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_ON));
+  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_ON));
 }
 
 String toJson(char* keys[], char* values[], int nField) {
@@ -1267,8 +1120,8 @@ void resetGlobalVariables() {
 
 void disableCoinSlot() {
   coinSlotActive = false;
-  digitalWrite(COIN_SET_PIN, LOW);
-  digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
+  // digitalWrite(COIN_SET_PIN, LOW);
+  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
 }
 
 int calculateAddTime() {
@@ -1315,13 +1168,10 @@ int calculateAddTime() {
   return totalTime * 60;
 }
 
-const char* COLUMN_DELIMETER = "#";
-const char* ROW_DELIMETER = "|";
-
 void populateSystemConfiguration() {
-
-  //detect if backup is exists
+  //Read atleast 4 bytes on system.data offset in EEPROM
   int backupLength = eeGetInt(BACKUP_CONFIG_LENGTH_INDEX);
+
   if (backupLength > 0) {
     Serial.print("Backup data found ");
     Serial.println(backupLength);
@@ -1335,79 +1185,107 @@ void populateSystemConfiguration() {
   }
 
   Serial.println("Loading system configuration");
-  String data = readFile("/admin/config/system.data");  //Joem: Need to add check here.
-  Serial.print("Data: ");
-  Serial.println(data);
-  int rowSize = 30;
-  String rows[rowSize];
-  split(rows, data, '|');
-  String ip[4];
-  split(ip, rows[3], '.');
+  String data = readFile("/admin/config/system.data"); 
 
-  mikrotikRouterIp[0] = ip[0].toInt();
-  mikrotikRouterIp[1] = ip[1].toInt();
-  mikrotikRouterIp[2] = ip[2].toInt();
-  mikrotikRouterIp[3] = ip[3].toInt();
+  if (data.isEmpty()) {
+    Serial.println("system.data is empty or does not exists.");
+  }
+  else {
+    Serial.print("Data: ");
+    Serial.println(data);
+  }
+
+  /* Parse system.data 
+   * Make sure this is consistent with postData = createParam([])
+   */
+  int rowSize = 31;
+  String rows[rowSize];
+
+  split(rows, data, '|');
+  
+  //Parse based on arrangement
   vendorName = rows[0];
-  ssid = rows[1];
-  password = rows[2];
-  user = rows[4];
-  pwd = rows[5];
-  MAX_WAIT_COIN_SEC = rows[6].toInt() * 1000;
-  ADMIN_USER = rows[7];
-  ADMIN_PW = rows[8];
-  adminAuth = base64::encode(ADMIN_USER + ":" + ADMIN_PW);
-  COINSLOT_BAN_COUNT = rows[9].toInt();
-  COINSLOT_BAN_MINUTES = rows[10].toInt();
-  COIN_SELECTOR_PIN = rows[11].toInt();
-  COIN_SET_PIN = rows[12].toInt();
-  SYSTEM_READY_LED = rows[13].toInt();
-  INSERT_COIN_LED = rows[14].toInt();
-  LCD_TYPE = rows[15].toInt();
-  INSERT_COIN_BTN_PIN = rows[16].toInt();
-  CHECK_INTERNET_CONNECTION = rows[17].toInt();
-  VOUCHER_PREFIX = rows[18];
-  MARQUEE_MESSAGE = rows[19];
-  SETUP_FINISH = rows[20].toInt();
-  VOUCHER_LOGIN_OPTION = rows[21].toInt();
-  VOUCHER_PROFILE = rows[22];
-  VOUCHER_VALIDITY_OPTION = rows[23].toInt();
-  LED_TRIGGER_TYPE = rows[24].toInt();
-  IP_ADDRESS_MODE = rows[25].toInt();
+  SETUP_FINISH = rows[1].toInt();
+  ssid = rows[2];
+  password = rows[3];
+  IP_ADDRESS_MODE = rows[4].toInt();
 
   if (IP_ADDRESS_MODE == 1) {
+    
+    //localIpAddress
     String localIpAddress[4];
-    split(localIpAddress, rows[26], '.');
-
+    split(localIpAddress, rows[5], '.');
     local_IP[0] = localIpAddress[0].toInt();
     local_IP[1] = localIpAddress[1].toInt();
     local_IP[2] = localIpAddress[2].toInt();
     local_IP[3] = localIpAddress[3].toInt();
 
+    //gatewayIp
     String gatewayIpAddress[4];
-    split(gatewayIpAddress, rows[27], '.');
-
+    split(gatewayIpAddress, rows[6], '.');
     gateway[0] = gatewayIpAddress[0].toInt();
     gateway[1] = gatewayIpAddress[1].toInt();
     gateway[2] = gatewayIpAddress[2].toInt();
     gateway[3] = gatewayIpAddress[3].toInt();
 
+    //subnetMask
     String subnetAddress[4];
-    split(gatewayIpAddress, rows[28], '.');
-
+    split(gatewayIpAddress, rows[7], '.');
     subnet[0] = subnetAddress[0].toInt();
     subnet[1] = subnetAddress[1].toInt();
     subnet[2] = subnetAddress[2].toInt();
     subnet[3] = subnetAddress[3].toInt();
 
+    //dnsServer
     String primaryDNSAddress[4];
-    split(primaryDNSAddress, rows[29], '.');
-
+    split(primaryDNSAddress, rows[8], '.');
     primaryDNS[0] = primaryDNSAddress[0].toInt();
     primaryDNS[1] = primaryDNSAddress[1].toInt();
     primaryDNS[2] = primaryDNSAddress[2].toInt();
     primaryDNS[3] = primaryDNSAddress[3].toInt();
   }
+
+  // mikrotikIp
+  {
+    String ip[10];
+    split(ip, rows[9], '.');
+
+    mikrotikRouterIp[0] = ip[0].toInt();
+    mikrotikRouterIp[1] = ip[1].toInt();
+    mikrotikRouterIp[2] = ip[2].toInt();
+    mikrotikRouterIp[3] = ip[3].toInt();
+  }
+  
+  // Mikrotik/Router
+  user = rows[10];
+  pwd = rows[11];
+  //confpwd = rows[12]; // Unsure
+
+  // WebGUI Admin Username and Password
+  ADMIN_USER = rows[13];
+  ADMIN_PW = rows[14];
+  //confadminpwd = rows[15];
+  adminAuth = base64::encode(ADMIN_USER + ":" + ADMIN_PW);
+
+  CHECK_INTERNET_CONNECTION = rows[16].toInt();
+  VOUCHER_PREFIX = rows[17];
+  VOUCHER_LOGIN_OPTION = rows[18].toInt();
+  VOUCHER_PROFILE = rows[19];
+  VOUCHER_VALIDITY_OPTION = rows[20].toInt();
+
+  // Hardware Settings
+  SENSOR_1_ASSERT_VAL = rows[21].toInt();
+  SENSOR_2_ASSERT_VAL = rows[22].toInt();
+  SENSOR_3_ASSERT_VAL = rows[23].toInt();
+  SENSOR_1_PIN = rows[24].toInt();
+  SENSOR_2_PIN = rows[25].toInt();
+  SENSOR_3_PIN = rows[26].toInt();
+  SERVO_1_PIN = rows[27].toInt();
+  SERVO_1_CW_VAL = rows[28].toInt();     //servo1ClockwiseVal
+  SERVO_1_ACW_VAL = rows[29].toInt();    //servo1AntiClockwiseVal
+  DEBUGLED_1_PIN = rows[30].toInt();
+
+  /* End system.data parse */
 }
 
 
@@ -1482,7 +1360,7 @@ void loop() {
 
     //insert button led will work only when have lcd
     if (LCD_TYPE > 0) {
-      int insertCoinButton = digitalRead(INSERT_COIN_BTN_PIN);
+      int insertCoinButton = 0;//digitalRead(INSERT_COIN_BTN_PIN);
       if (insertCoinButton == LOW) {
         printPleaseWait();
         if (!manualVoucher) {
@@ -1585,27 +1463,18 @@ printing:
         ESP.restart();
       }
     }
-#ifdef ESP32
-    //nothing
-#else
     dnsServer.processNextRequest();
-#endif
   }
-
   server.handleClient();
-#ifdef ESP32
-  //nothing
-#else
   MDNS.update();
-#endif
 }
 
 void handleSystemAbnormal() {
   Serial.println("AP disconnected!!!!!!!!!!!!!!!");
   mikrotekConnectionSuccess = false;
   printSystemNotAvailable();
-  digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
-  digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
+  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
+  // digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
   //Reconnect after 30 seconds
   delay(30000);
   ESP.restart();
@@ -1904,21 +1773,4 @@ int startCenterIndex(String text) {
     startCenterIndex--;
   }
   return startCenterIndex;
-}
-
-
-int evaluateTriggerOutput(int state) {
-  if (LED_TRIGGER_TYPE == 1) {
-    if (state == TURN_ON) {
-      return HIGH;
-    } else {
-      return LOW;
-    }
-  } else {
-    if (state == TURN_ON) {
-      return LOW;
-    } else {
-      return HIGH;
-    }
-  }
 }

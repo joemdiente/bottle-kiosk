@@ -6,7 +6,7 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
   background-color: #4b4b4b;
-  padding: 10px
+  padding: 50px
 }
 
 .topnav {
@@ -17,9 +17,9 @@ body {
 .topnav button {
   float: left;
   display: block;
-  color: #f2f2f2;
+  color: #ECDFCC;
   text-align: center;
-  padding: 14px 16px;
+  padding: 10px 5px;
   text-decoration: none;
   font-size: 17px;
   background-color: #353b48;
@@ -27,12 +27,12 @@ body {
 }
 
 .topnav button:hover {
-  background-color: #ddd;
+  background-color: #ECDFCC;
   color: black;
 }
 
 .topnav button.active {
-  background-color: #04AA6D;
+  background-color: #697565;
   color: white;
 }
 
@@ -57,7 +57,7 @@ body {
     right: 0;
     top: 0;
 	width: 20%;
-	color: orange
+	color: rgb(0, 0, 0)
   }
   .topnav.responsive button {
     float: none;
@@ -68,11 +68,11 @@ body {
 }
 
 .main-container {
-	border: 2px solid #485460;
+	border: 50px solid #3C3D37;
 	max-width: 800px;
 	margin: auto;
 	padding: 20px;
-	background-color: #3d3d3d
+	background-color: #3C3D37
 }
 
 .panel {
@@ -80,13 +80,17 @@ body {
 	margin-top: 30px;
 	padding: 10px;
 	border-radius: 5px;
-	border: 1px solid #485460
+	border: 1px solid #697565
 }
 
 .panel p {
 	font-size: 20px;
 	font-weight: bold;
-	color: #fff
+	color: #ECDFCC
+}
+.panel button:hover {
+  background-color: #9B3922;
+  color: ECDFCC;
 }
 
 .title {
@@ -94,14 +98,14 @@ body {
 	display: block;
 	text-align: center;
 	padding: 5px;
-	color: #ff7f50;
+	color: #ECDFCC;
 	border-bottom: 1px solid #485460
 }
 
 .accordion {
 	border: none;
 	padding: 5px;
-	background-color: #05c46b;
+	background-color: #697565;
 	border-radius: 3px;
 	color: #fff
 }
@@ -109,7 +113,7 @@ body {
 .registerbtn {
 	border: none;
 	padding: 5px;
-	background-color: #05c46b;
+	background-color: #697565;
 	border-radius: 3px;
 	margin-top: 10px;
 	width: 70px;
@@ -119,7 +123,7 @@ body {
 .uploadBtn {
 	border: none;
 	padding: 5px;
-	background-color: #05c46b;
+	background-color: #697565;
 	border-radius: 3px;
 	margin-top: 10px;
 	width: 120px;
@@ -169,7 +173,8 @@ input placeholder {
 }
 
 h2 {
-	color: #ff7f50;
+	color: #ECDFCC;
+	font-size: 30px
 }
 
 .rateholder {
@@ -385,8 +390,11 @@ function myFunction() {
 	<label for="email"><b>Sensor 3 Assertion value</b></label><br>
     <input type="text" placeholder="Output value of Sensor 3 if blocked" id="sensor3AssertVal" required><br>
 
-	<label for="email"><b>Servo 1 Angle when Dispensing Bottle</b></label><br>
-    <input type="text" placeholder="Set value to " id="servo1AngleVal" required><br>
+	<label for="email"><b>Servo 1 Clockwise Stop Time</b></label><br>
+    <input type="text" placeholder="Set time when clockwise rotation will stop" id="servo1ClockwiseVal" required><br>
+
+	<label for="email"><b>Servo 1 Anti-Clockwise Stop Time</b></label><br>
+    <input type="text" placeholder="Set time when anti-clockwise rotation will stop " id="servo1AntiClockwiseVal" required><br>
 	</div>
 	
 	<div class="panel">
@@ -439,8 +447,8 @@ function myFunction() {
 		<option value="15" selected>D8</option>
 	</select><br>
 	
-	<label for="debugLed"><b>Debug LED (Always D4)</b></label><br>
-    <select name="ledTriggerType" id="ledTriggerType">
+	<label for="debugLed1Pin"><b>Debug LED (Always D4)</b></label><br>
+    <select name="debugLed1Pin" id="debugLed1Pin">
 		<option value="2" selected>D4</option>
 	</select>
 	</div>
@@ -455,7 +463,7 @@ function myFunction() {
 	  <option value="1">Username + Password</option>
 	</select>
 	<label for="voucherProfile"><b>Voucher Profile</b></label><br>
-	<input type="text" value="default" placeholder="default" id="voucherProfile" required>
+	<input type="text" value="default" placeholder="default" id="voucherProfile" maxlength="14" required>
 	<label for="voucherValidity"><b>Voucher Validity</b></label><br>
 	<select name="voucherValidity" id="voucherValidity">
 	  <option value="0">Stack up validity when extend time</option>
@@ -572,14 +580,18 @@ function saveSystemConfig(){
 	var sensor2Pin = $('#sensor2Pin').val();
 	var sensor3Pin = $('#sensor3Pin').val();
 	var servo1Pin = $('#servo1Pin').val();
-	var debugLedPin = $('#debugLed').val();
+	var debugLed1Pin = $('#debugLed1Pin').val();
+
+	var sensor1AssertVal = $('#sensor1AssertVal').val();
+	var sensor2AssertVal = $('#sensor2AssertVal').val();
+	var sensor3AssertVal = $('#sensor3AssertVal').val();
 
 	var pinMap = [];
 	pinMap['Sensor 1 Pin'] = sensor1Pin;
 	pinMap['Sensor 2 Pin'] = sensor2Pin;
 	pinMap['Sensor 3 Pin'] = sensor3Pin;
 	pinMap['Servo 1 Pin'] = servo1Pin;
-	pinMap['Debug LED'] = sensor1Pin;
+	pinMap['Debug LED'] = debugLed1Pin;
 	
 	if($('#mikrotikPw').val() != $('#confirmMikrotikPw').val()){
 		alert('Mikrotik password is not equal to confirm mikrotik password');
@@ -592,6 +604,7 @@ function saveSystemConfig(){
 	}
 	
 	if(!validatePin(pinMap)){
+		alert('Failed validating pin');
 		return;
 	}
 	
@@ -616,35 +629,37 @@ function saveSystemConfig(){
 	$('#setupDoneFlag').val("1");
 
 	var postData = createParam([
-				$('#vendoName').val(),
+				$('#vendoName').val(),				//0
+				$('#setupDoneFlag').val(),
 				$('#wifiSSID').val(),
 				$('#wifiPW').val(),
+				ipAddressMode,
+				$("#localIpAddress").val(),
+				$("#gatewayIp").val(),
+				$("#subnetMask").val(),
+				$("#dnsServer").val(),
 				$('#mikrotikIp').val(),
 				$('#mikrotikUser').val(),
 				$('#mikrotikPw').val(),
-				$('#sensor1AssertVal').val(),
-				$('#adminUser').val(),
+				$('#confirmMikrotikPw').val(),
+				$('#adminUser').val(),				//13
 				$('#adminPw').val(),
-				$('#sensor2AssertVal').val(),
-				$('#sensor3AssertVal').val(),
-				$('#servo1AngleVal').val(),
+				$('#confirmAdminPw').val(),
+				$('#checkInternetStatus').val(),
+				$('#voucherPrefix').val(),
+				$('#voucherLoginOption').val(),
+				$('#voucherProfile').val(),
+				$('#voucherValidity').val(),		//20
+				sensor1AssertVal,
+				sensor2AssertVal,
+				sensor3AssertVal,
 				sensor1Pin,
 				sensor2Pin,
 				sensor3Pin,
 				servo1Pin,
-				$('#checkInternetStatus').val(),
-				$('#voucherPrefix').val(),
-				$('#welcomeLCDMarquee').val(),
-				$('#setupDoneFlag').val(),
-				$('#voucherLoginOption').val(),
-				$('#voucherProfile').val(),
-				$('#voucherValidity').val(),
-				$('#ledTriggerType').val(),
-				ipAddressMode,
-				localIpAddress,
-				gatewayIp,
-				subnetMask,
-				dnsServer
+				servo1ClockwiseVal,
+				servo1AntiClockwiseVal,
+				debugLed1Pin
 			 ]);
 				 
 	$.ajax({
@@ -764,41 +779,6 @@ function openDashboard(evt){
 		version = dashboardData[9];
 		$('#appVersionAbout').html(version);
 		$('#currentVersion').html(version);
-		if(hardwareType == 'ESP32'){
-			$('#apSettingDiv').attr('style','display: none');
-			
-			$('select[name*="Pin"]' ).each(function( index ) {
-			  $(this).html(""); 	
-			  $(this)
-				.append(new Option("P0", "0"))
-				.append(new Option("P1", "1"))
-				.append(new Option("P2", "2"))
-				.append(new Option("P3", "6"))
-				.append(new Option("P4", "4"))
-				.append(new Option("P6", "5"))
-				.append(new Option("P7", "7"))
-				.append(new Option("P8", "8"))
-				.append(new Option("P9", "9"))
-				.append(new Option("P10", "10"))
-				.append(new Option("P11", "11"))
-				.append(new Option("P12", "12"))
-				.append(new Option("P13", "13"))
-				.append(new Option("P14", "14"))
-				.append(new Option("P15", "15"))
-				.append(new Option("P16", "16"))
-				.append(new Option("P17", "17"))
-				.append(new Option("P25", "25"))
-				.append(new Option("P26", "26"))
-				.append(new Option("P27", "27"))
-				.append(new Option("P32", "32"))
-				.append(new Option("P33", "33"))
-				.append(new Option("P34", "34"))
-				.append(new Option("P35", "35"))
-				.append(new Option("P36", "36"))
-				.append(new Option("P39", "39"));
-			});
-			
-		}
 	  }
 	});
 	openTab(evt, 'Dashboard');
@@ -814,42 +794,57 @@ function openSystemConfig(evt){
 	});
 	openTab(evt, 'SystemConfigration');
 }
-
+/*
+ * Make sure sequence of this matches with the "postData = createParam([])"
+ */
 function populateSystemConfigFields(data){
 	var configData = data.split(separator);
-	$('#vendoName').val(configData[0]);
-	$('#wifiSSID').val(configData[1]);
-	$('#wifiPW').val(configData[2]);
-	$('#mikrotikIp').val(configData[3]);
-	$('#mikrotikUser').val(configData[4]);
-	$('#mikrotikPw').val(configData[5]);
-	$('#confirmMikrotikPw').val(configData[5]);
-	$('#sensor1AssertVal').val(configData[6]);
-	$('#adminUser').val(configData[7]);
-	$('#adminPw').val(configData[8]);
-	$('#confirmAdminPw').val(configData[8]);
-	$('#sensor2AssertVal').val(configData[9]);
-	$('#sensor3AssertVal').val(configData[10]);
-	$('#sensorlPin').val(configData[11]);
-	$('#sensor2Pin').val(configData[12]);
-	$('#sensor3Pin').val(configData[13]);
-	$('#servo1Pin').val(configData[14]);
-	$('#servo1AngleVal').val(configData[15]);
-	$('#debugLed').val(configData[16]);
-	$('#checkInternetStatus').val(configData[17]);
-	$('#voucherPrefix').val(configData[18]);
-	$('#servo1AngleVal').val(configData[19]);
-	$('#setupDoneFlag').val(configData[20]);
-	$('#voucherLoginOption').val(configData[21]);
-	$('#voucherProfile').val(configData[22]);
-	$('#voucherValidity').val(configData[23]);
-	$('#ledTriggerType').val(configData[24]);
-	$("#ipAddressMode").val(configData[25]);
-	$("#ipAddressMode").change();
-	$("#localIpAddress").val(configData[26]);
-	$("#gatewayIp").val(configData[27]);
-	$("#subnetMask").val(configData[28]);
-	$("#dnsServer").val(configData[29]);
+	var configOffset = 0;
+
+	// Main Settings
+	$('#vendoName').val(configData[configOffset++]);
+	$('#setupDoneFlag').val(configData[configOffset++]);
+
+	// Wifi AP Settings
+	$('#wifiSSID').val(configData[configOffset++]);
+	$('#wifiPW').val(configData[configOffset++]);
+
+	// Wifi Station Settings
+	$("#ipAddressMode").val(configData[configOffset++]);
+	$("#localIpAddress").val(configData[configOffset++]);
+	$("#gatewayIp").val(configData[configOffset++]);
+	$("#subnetMask").val(configData[configOffset++]);
+	$("#dnsServer").val(configData[configOffset++]);
+
+	// L3/Router Switch Settings
+	$('#mikrotikIp').val(configData[configOffset++]);
+	$('#mikrotikUser').val(configData[configOffset++]);
+	$('#mikrotikPw').val(configData[configOffset++]);
+	$('#confirmMikrotikPw').val(configData[configOffset++]);
+	$('#adminUser').val(configData[configOffset++]);
+	$('#adminPw').val(configData[configOffset++]);
+	$('#confirmAdminPw').val(configData[configOffset++]);
+
+	//Internal Tracking
+	$('#checkInternetStatus').val(configData[configOffset++]);
+
+	// Voucher Settings
+	$('#voucherPrefix').val(configData[configOffset++]);
+	$('#voucherLoginOption').val(configData[configOffset++]);
+	$('#voucherProfile').val(configData[configOffset++]);
+	$('#voucherValidity').val(configData[configOffset++]);
+
+	// Hardware-related Settings
+	$('#sensor1AssertVal').val(configData[configOffset++]);
+	$('#sensor2AssertVal').val(configData[configOffset++]);
+	$('#sensor3AssertVal').val(configData[configOffset++]);
+	$('#sensor1Pin').val(configData[configOffset++]);
+	$('#sensor2Pin').val(configData[configOffset++]);
+	$('#sensor3Pin').val(configData[configOffset++]);
+	$('#servo1Pin').val(configData[configOffset++]);
+	$('#servo1ClockwiseVal').val(configData[configOffset++]);
+	$('#servo1AntiClockwiseVal').val(configData[configOffset++]);
+	$('#debugLed1Pin').val(configData[configOffset++]);
 }
 
 var rateCount = 0;
