@@ -1,28 +1,23 @@
 /*
+ * Sapientia Wifi VendoMachine (Fork of JuanFi)
+ * No Copyright Infringment Intended
  * 
- * PisoWifi coinslot system with integration to Mikrotik Hotspot, 
- * Using
- * 
- * Features
- * 
- * Coinslot System
- *    -Mikrotik integration
- *    -Pause expiration
- *    -Codeless generation
+ * Using NodeMCU ESP8266, Servo, Distance Sensor and Mikrotik Router
  * 
  * Admin System
  *   - Initial setup of the system
- *   - Mikrotik connection setup, SSID setup, coinslot settings
+ *   - Mikrotik connection setup, SSID setup, Hardware settings
  *   - Promo Rates configuration ( Rates, expiration)
  *   - Dashboard, Sales report
  * 
  * Supported ESP8266 
  * 
- * 
 */
 
 //increase always when publishing a new version for tracking
 #define CURRENT_VERSION "0.1"
+
+// #pragma GCC diagnostic ignored "-Wwrite-strings"
 
 #include <ESP8266TelnetClient.h>
 #include <ESP8266WiFi.h>
@@ -37,7 +32,6 @@
 #include <EEPROM.h>
 #include <FS.h>
 #include <base64.h>
-#include <LiquidCrystal_I2C.h>
 
 /* 
  * Delimiter for rates.data = #
@@ -48,24 +42,25 @@ int TURN_OFF = 0;
 int TURN_ON = 1;
 // Start here.
 // Hardware-related settings
-int SENSOR_1_ASSERT_VAL = 1;
-int SENSOR_2_ASSERT_VAL = 1;
-int SENSOR_3_ASSERT_VAL = 1;
-int SENSOR_1_PIN = D0;
-int SENSOR_2_PIN = D1;
-int SENSOR_3_PIN = D2;
+volatile int SENSOR_1_ASSERT_VAL = 1;
+volatile int SENSOR_2_ASSERT_VAL = 1;
+volatile int SENSOR_3_ASSERT_VAL = 1;
+int SENSOR_1_PIN = D6;
+int SENSOR_2_PIN = D7;
+int SENSOR_3_PIN = D3;
 int SERVO_1_PIN = D8;
 int SERVO_1_CW_VAL = 120;     //servo1ClockwiseVal
 int SERVO_1_ACW_VAL = 120;    //servo1AntiClockwiseVal
-int DEBUGLED_1_PIN = D4;
+int DEBUGLED_1_PIN = D4;      //Yellow LED 
+int DEBUGLED_2_PIN = D5;      //Green  LED
 
 // Main Sensor-Bottle Logic Variables
-int sensor1Active = 0;
-int sensor2Active = 0;
-int sensor3Active = 0;
+volatile int sensor1Active = 0;
+volatile int sensor2Active = 0;
+volatile int sensor3Active = 0;
 
 //Put here your Mikrotik IP address, and login details
-IPAddress mikrotikRouterIp(192, 168, 100, 1);
+IPAddress mikrotikRouterIp(192, 168, 88, 1);
 String user = "botefi";
 String pwd = "test";
 String ssid = "Sapientia Wifi VendoMachine";
@@ -80,7 +75,7 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(192, 168, 10, 1);  // this is optional
 
 //Put here ESP8266 IP Address for Wifi Station 
-IPAddress apIP(172, 217, 28, 1);
+IPAddress apIP(192, 168, 88, 150);
 
 WiFiClient client2;
 WiFiClient client;
@@ -99,52 +94,43 @@ String VOUCHER_PREFIX = "P";
 int SETUP_FINISH = 0;
 
 /* EEPROM Layout (??) */
-const int LIFETIME_COIN_COUNT_ADDRESS = 0;
-const int COIN_COUNT_ADDRESS = 5;
+const int LIFETIME_BOTTLE_COUNT_ADDRESS = 0;
+const int CURRENT_BOTTLE_COUNT_ADDRESS = 5;
 const int CUSTOMER_COUNT_ADDRESS = 10;
 const int RANDOM_MAC_ADDRESS = 15;
 const int BACKUP_CONFIG_LENGTH_INDEX = 20;
 
-//Sensor 1 ISR
-void IRAM_ATTR sensor1Asserted() {
-  if (digitalRead(SENSOR_1_PIN)) {
-    sensor1Active = SENSOR_1_ASSERT_VAL;
-  }
+//Sensors ISR
+IRAM_ATTR void sensor1Asserted() {
+  sensor1Active = 1;
 }
-
-//Sensor 2 ISR
-void IRAM_ATTR sensor2Asserted() {
-  if (digitalRead(SENSOR_2_PIN)) {
-    sensor2Active = SENSOR_2_ASSERT_VAL;
-  }
+IRAM_ATTR void sensor2Asserted() {
+  sensor2Active = 1;
 }
-
-//Sensor 3 ISR
-void IRAM_ATTR sensor3Asserted() {
-  if (digitalRead(SENSOR_3_PIN)) {
-    sensor3Active = SENSOR_3_ASSERT_VAL;
-  }
+IRAM_ATTR void sensor3Asserted() {
+  sensor3Active = 1;
 }
 ///////////////Unverified Code Below/////////////////////////
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-LiquidCrystal_I2C lcd20x4(0x27, 20, 4);
 
-volatile int coin = 0;
-volatile int processCoin = 0;
-volatile int totalCoin = 0;
+volatile int bottle = 0;
+volatile int processBottle = 0;
+volatile int totalBottle = 0;
 boolean isNewVoucher = false;
-int coinsChange = 0;
+int bottlesChange = 0;
 String currentActiveVoucher = "";
 String currentMacAttempt = "";
 int timeToAdd = 0;
-bool coinSlotActive = false;
-bool acceptCoin = false;
+bool isBottleDetectionActive = false;
+bool acceptBottle = false;
 unsigned long targetMilis = 0;
-bool coinExpired = false;
+bool bottleExpired = false;
 bool mikrotekConnectionSuccess = false;
 String currentMacAddress = "";
 String currentIpAddress = "";
-String HARDWARE_TYPE = "ESP8266";
+String HARDWARE_TYPE = "NodeMCU v1 ESP8266";
+
+int bottleWaiting = 0;
+long lastLinkStatusCheck = 0;
 
 typedef struct {
   String rateName;
@@ -172,539 +158,20 @@ String ADMIN_USER = "";
 String ADMIN_PW = "";
 
 
-int MAX_WAIT_COIN_SEC = 30000;
-int COINSLOT_BAN_COUNT = 0;
-int COINSLOT_BAN_MINUTES = 0;
-int LCD_TYPE = 0;
+int MAX_WAIT_BOTTLE_SEC = 30000;
+int BOTTLE_INSERT_BAN_COUNT = 0;
+int INSERTBOTTLE_BAN_MINUTES = 0;
 
 const int WIFI_CONNECT_TIMEOUT = 180000;
 const int WIFI_CONNECT_DELAY = 500;
 
 bool networkConnected = false;
 bool cableNotConnected = false;
-bool welcomePrinted = false;
 bool manualVoucher = false;
 
-int lastSaleTime = 0;
-int thankyou_cooldown = 5000;
 long lastPrinted = 0;
 
-String MARQUEE_MESSAGE = "This is marquee";
-
-void setup() {
-
-  Serial.begin(115200);
-  Serial.println();
-  Serial.println();
-  Serial.println();
-  delay(300);           // Wait for 'stabilize' serial
-  
-  EEPROM.begin(512);
-  if (!LittleFS.begin()) {
-    Serial.println("An Error has occurred while mounting LittleFS");
-    return;
-  }
-  populateSystemConfiguration();
-
-  pinMode(SENSOR_1_PIN, INPUT);
-  pinMode(SENSOR_2_PIN, INPUT);
-  pinMode(SENSOR_3_PIN, INPUT);
-  pinMode(DEBUGLED_1_PIN, OUTPUT);
-  pinMode(SERVO_1_PIN, OUTPUT);
-
-  // We start by connecting to a WiFi network
-  WiFi.mode(WIFI_STA);
-
-  //for static ip configuration
-  if (IP_ADDRESS_MODE == 1) { //Static instead of DHCP
-    Serial.print("[WIFI_STA] Using static ip address");
-    Serial.println(local_IP);
-    WiFi.config(local_IP, primaryDNS, gateway, subnet);
-  }
-
-  WiFi.begin(ssid.c_str(), password.c_str());
-
-  Serial.println();
-  Serial.println();
-  Serial.print("[WIFI_STA] Wait for WiFi, connecting to ");
-  Serial.print(ssid);
-
-  int second = 0;
-  
-  // Go here if initial setup (SETUP_FINISH) is already done.
-  if (SETUP_FINISH == 1) {
-    while (second <= WIFI_CONNECT_TIMEOUT) {
-      networkConnected = (WiFi.status() == WL_CONNECTED);
-      Serial.print(".");
-      if (networkConnected) {
-        break;
-      }
-      delay(WIFI_CONNECT_DELAY);
-      second += WIFI_CONNECT_DELAY;
-    }
-    currentIpAddress = WiFi.localIP().toString().c_str();
-    currentMacAddress = WiFi.macAddress();
-  } else {
-    Serial.println("Initial setup detected, no need to connect to AP");
-    networkConnected = false;
-  }
-
-  if (networkConnected) {
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(currentIpAddress);
-    Serial.print("Mac address: ");
-    Serial.println(currentMacAddress);
-    Serial.println("Connecting.... ");
-    Serial.print("Attaching interrupt ");
-
-    //Attach Interrupt Here
-    attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2Asserted, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3Asserted, CHANGE);
-    loginMirotik();
-
-    if (MDNS.begin("esp8266")) {
-      Serial.println("MDNS responder started");
-    }
-
-    server.on("/topUp", topUp);
-    server.on("/checkCoin", checkCoin);
-    server.on("/useVoucher", useVoucher);
-    server.on("/health", handleHealth);
-    server.on("/getRates", handleUserGetRates);
-    server.on("/cancelTopUp", handleCancelTopUp);
-    server.on("/testInsertCoin", testInsertCoin);
-    server.onNotFound(handleNotFound);
-    printWelcome();
-    welcomePrinted = true;
-
-  } else {
-    //Soft AP setup
-    WiFi.mode(WIFI_AP);
-    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    WiFi.softAP("Sapientia Wifi Setup");
-    //if DNSServer is started with "*" for domain name, it will reply with
-    //provided IP to all DNS request
-    dnsServer.start(DNS_PORT, "*", apIP);
-
-    server.onNotFound([]() {
-      server.sendHeader("Location", String("/admin"), true);
-      server.send(302, "text/plain", "");
-    });
-  }
-
-  server.on("/admin/api/dashboard", handleAdminDashboard);
-  server.on("/admin/js/jquery.min.js", handleJquerySript);
-  server.on("/admin/api/resetStatistic", handleAdminResetStats);
-  server.on("/admin/api/saveSystemConfig", handleAdminSaveSystemConfig);
-  server.on("/admin/api/getSystemConfig", handleAdminGetSystemConfig);
-  server.on("/admin/api/getRates", handleAdminGetRates);
-  server.on("/admin/api/saveRates", handleAdminSaveRates);
-  server.on("/admin/api/logout", handleLogout);
-  server.on("/admin/api/generateVouchers", handleGenerateVouchers);
-  server.on("/admin", handleAdminPage);
-  server.on("/admin/viewGeneratedVouchers", handleAdminGeneratedVoucherPage);
-  server.on("/admin/updateMainBin", HTTP_POST, handleFileUploadRequest, handleFileUploadStream);
-
-  populateRates();
-
-  server.begin();
-
-  if (mikrotekConnectionSuccess) {
-    digitalWrite(DEBUGLED_1_PIN, HIGH);
-  }
-
-  ///////// End of Code Modification ///////
-}
-/* End of setup() */
-
-boolean hasUploadError = false;
-boolean isFileSystem = true;
-
-void handleFileUploadRequest() {
-  if (Update.hasError()) {
-    server.send(200, F("text/html"), "Upload has error");
-  } else {
-    server.client().setNoDelay(true);
-    server.send_P(200, PSTR("text/html"), "Upload done");
-    delay(100);
-    server.client().stop();
-    ESP.restart();
-  }
-}
-
-//get from https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPUpdateServer/src/ESP8266HTTPUpdateServer-impl.h
-void handleFileUploadStream() {
-  HTTPUpload& upload = server.upload();
-  if (upload.status == UPLOAD_FILE_START) {
-    if (!isAuthorized()) {
-      handleNotAuthorize();
-      return;
-    }
-    if (upload.name == "filesystem") {
-      isFileSystem = true;
-      backupSystemConfig();
-      size_t fsSize = ((size_t)&_FS_end - (size_t)&_FS_start);
-      close_all_fs();
-      if (!Update.begin(fsSize, U_FS)) {  //start with max available size
-        Serial.println("Upload filesystem start failed");
-        hasUploadError = true;
-      }
-    } else {
-      uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-      if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
-        Serial.println("Upload sketch start failed");
-        hasUploadError = true;
-      }
-    }
-  } else if (upload.status == UPLOAD_FILE_WRITE && !hasUploadError) {
-    Serial.printf(".");
-    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Serial.println("Upload write failed");
-      hasUploadError = true;
-    }
-  } else if (upload.status == UPLOAD_FILE_END && !hasUploadError) {
-    if (Update.end(true)) {  //true to set the size to the current progress
-      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-    } else {
-      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-    }
-  } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    Update.end();
-    hasUploadError = true;
-    Serial.println("Upload aborted");
-  }
-  delay(0);
-}
-
-void backupSystemConfig() {
-  Serial.println("Starting to backup system.data");
-  String data = readFile("/admin/config/system.data");
-  int len = data.length();
-  eeWriteInt(BACKUP_CONFIG_LENGTH_INDEX, len);
-  eeWriteString(BACKUP_CONFIG_LENGTH_INDEX + 5, data);
-}
-
-void handleNotFound() {
-  Serial.println("preflight....");
-  if (server.method() == HTTP_OPTIONS) {
-    Serial.println("Preflight request....");
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.sendHeader("Access-Control-Max-Age", "10000");
-    server.sendHeader("Access-Control-Allow-Methods", "PUT,POST,GET,OPTIONS");
-    server.sendHeader("Access-Control-Allow-Headers", "*");
-    server.sendHeader("Access-Control-Allow-Credentials", "false");
-    server.send(204);
-  } else {
-    server.send(404, "text/plain", "");
-  }
-}
-
-void handleHealth() {
-  setupCORSPolicy();
-  server.send(200, "text/plain", "ok");
-}
-
-void handleLogout() {
-  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
-  server.send(401, "text/html", "<html>Authentication failed</html>");
-}
-
-void loginMirotik() {
-
-  //WHICH CHARACTER SHOULD BE INTERPRETED AS "PROMPT"?
-  tc.setPromptChar('>');
-
-  //this is to trigger manually the login
-  //since it could be a problem to attach the serial monitor while negotiating with the server (it cause the board reset)
-  //remove it or replace it with a delay/wait of a digital input in case you're not using the serial monitors
-  Serial.print("Logging in to mikrotik ");
-  Serial.print(mikrotikRouterIp);
-  Serial.print(" using ");
-  Serial.print(user);
-  Serial.print(" / ");
-  Serial.println(pwd);
-  delay(3000);
-
-  //PUT HERE YOUR USERNAME/PASSWORD
-  mikrotekConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
-  if (mikrotekConnectionSuccess) {
-    Serial.println("Login to mikrotek router success");
-  } else {
-    //Temporary fix for those cannot connect to mikrotik
-    mikrotekConnectionSuccess = true;
-    Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
-  }
-}
-
-void testInsertCoin() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-  String data = server.arg("coin");
-  if (coinSlotActive) {
-    coin += data.toInt();
-    coinsChange = 1;
-  }
-  server.send(200, "text/plain", "ok");
-}
-
-void handleCancelTopUp() {
-
-  if (!checkIfSystemIsAvailable()) {
-    return;
-  }
-  String voucher = server.arg("voucher");
-  if (!validateVoucher(voucher)) {
-    return;
-  }
-  targetMilis = millis();
-  char* keys[] = { "status" };
-  char* values[] = { "true" };
-  setupCORSPolicy();
-  server.send(200, "application/json", toJson(keys, values, 1));
-}
-
-void eeWriteInt(int pos, int val) {
-  byte* p = (byte*)&val;
-  EEPROM.write(pos, *p);
-  EEPROM.write(pos + 1, *(p + 1));
-  EEPROM.write(pos + 2, *(p + 2));
-  EEPROM.write(pos + 3, *(p + 3));
-  EEPROM.commit();
-}
-
-void eeWriteString(int addr, String val) {
-  int str_len = val.length() + 1;
-  for (int i = addr; i < str_len + addr; ++i) {
-    EEPROM.write(i, val.charAt(i - addr));
-  }
-  EEPROM.write(str_len + addr, '\0');
-  EEPROM.commit();
-}
-
-String eeReadString(int addr, int str_len) {
-  String val = "";
-  for (int i = addr; i < str_len + addr; ++i) {
-    val += String(char(EEPROM.read(i)));
-  }
-  return val;
-}
-
-/* Read atleast 4 bytes */
-int eeGetInt(int pos) {
-  int val;
-  byte* p = (byte*)&val;
-  *p = EEPROM.read(pos);
-  *(p + 1) = EEPROM.read(pos + 1);
-  *(p + 2) = EEPROM.read(pos + 2);
-  *(p + 3) = EEPROM.read(pos + 3);
-  if (val < 0) {
-    return 0;
-  } else {
-    return val;
-  }
-}
-
-void handleJquerySript() {
-  handleFileRead("/admin/js/jquery.min.js");
-}
-
-void handleUserGetRates() {
-  setupCORSPolicy();
-  handleFileRead("/admin/config/rates.data");
-}
-
-void handleAdminGetRates() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-  handleFileRead("/admin/config/rates.data");
-}
-
-void handleAdminSaveRates() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  String data = server.arg("data");
-  handleFileWrite("/admin/config/rates.data", data);
-  populateRates();
-  server.send(200, "text/plain", "ok");
-}
-
-void handleAdminSaveSystemConfig() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  String data = server.arg("data");
-  handleFileWrite("/admin/config/system.data", data);
-  server.send(200, "text/plain", "ok");
-  delay(2000);
-  ESP.restart();
-}
-
-void handleAdminGetSystemConfig() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  handleFileRead("/admin/config/system.data");
-}
-
-void handleAdminResetStats() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  String type = server.arg("type");
-  if (type == "lifeTimeCount") {
-    eeWriteInt(LIFETIME_COIN_COUNT_ADDRESS, 0);
-  } else if (type == "coinCount") {
-    eeWriteInt(COIN_COUNT_ADDRESS, 0);
-  } else if (type == "customerCount") {
-    eeWriteInt(CUSTOMER_COUNT_ADDRESS, 0);
-  }
-  server.send(200, "text/plain", "ok");
-}
-
-void handleAdminDashboard() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  long upTime = millis();
-  int lifeTimeCoinCount = eeGetInt(LIFETIME_COIN_COUNT_ADDRESS);
-  int coinCount = eeGetInt(COIN_COUNT_ADDRESS);
-  int customerCount = eeGetInt(CUSTOMER_COUNT_ADDRESS);
-  bool hasInternetConnection = true;
-  if (CHECK_INTERNET_CONNECTION == 1) {
-    hasInternetConnection = hasInternetConnect();
-  }
-  String data = "";
-  data += String(upTime);
-  data += String("|");
-  data += String(lifeTimeCoinCount);
-  data += String("|");
-  data += String(coinCount);
-  data += String("|");
-  data += String(customerCount);
-  data += String("|");
-  if (hasInternetConnection) {
-    data += String("1");
-  } else {
-    data += String("0");
-  }
-  data += String("|");
-  if (mikrotekConnectionSuccess) {
-    data += String("1");
-  } else {
-    data += String("0");
-  }
-  data += String("|");
-  data += currentMacAddress;
-  data += String("|");
-  data += currentIpAddress;
-  data += String("|");
-  data += HARDWARE_TYPE;
-  data += String("|");
-  data += CURRENT_VERSION;
-
-  server.send(200, "text/plain", data);
-}
-
-void handleAdminPage() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  handleFileRead("/admin/system-config.html");
-}
-
-void handleAdminGeneratedVoucherPage() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  handleFileRead("/admin/voucher-generate.html");
-}
-
-
-
-bool isAuthorized() {
-  String auth = server.header("Authorization");
-  String expectedAuth = "Basic " + adminAuth;
-  if (auth != expectedAuth) {
-    Serial.print("Admin incorrect: ");
-    Serial.print(auth);
-    Serial.print(" vs ");
-    Serial.println(expectedAuth);
-  }
-  return auth == expectedAuth;
-}
-
-void handleNotAuthorize() {
-  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
-  server.send(401, "text/html", "<html>Authentication failed</html>");
-}
-
-bool handleFileRead(String path) {  // send the right file to the client (if it exists)
-  Serial.println("handleFileRead: " + path);
-  if (path.endsWith("/")) path += "index.html";  // If a folder is requested, send the index file
-  String contentType = getContentType(path);     // Get the MIME type
-  String pathWithGz = path + ".gz";
-  if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) {  // If the file exists, either as a compressed archive, or normal
-    if (LittleFS.exists(pathWithGz))                           // If there's a compressed version available
-      path += ".gz";                                           // Use the compressed version
-    File file = LittleFS.open(path, "r");                      // Open the file
-    size_t sent = server.streamFile(file, contentType);        // Send it to the client
-    file.close();                                              // Close the file again
-    Serial.println(String("\tSent file: ") + path);
-    return true;
-  }
-  Serial.println(String("\tFile Not Found: ") + path);
-  return false;  // If the file doesn't exist, return false
-}
-
-bool handleFileWrite(String path, String content) {  // send the right file to the client (if it exists)
-  Serial.println("handleFileWrite: " + path);
-  if (LittleFS.exists(path)) {
-    File file = LittleFS.open(path, "w");
-    int bytesWritten = file.print(content);
-    if (bytesWritten <= 0) {
-      return false;
-    }
-    file.close();
-    Serial.println(String("Write file: ") + path);
-    return true;
-  }
-  Serial.println(String("\tFile Not Found: ") + path);
-  return false;  // If the file doesn't exist, return false
-}
-
-String readFile(String path) {
-  String result;
-  if (LittleFS.exists(path)) {
-    File file = LittleFS.open(path, "r");
-    String content = file.readStringUntil('\n');
-    file.close();
-    return content;
-  }
-  return result;
-}
-
+/* Important Functions for Program Logic */
 String getContentType(String filename) {
   if (filename.endsWith(".html")) return "text/html";
   else if (filename.endsWith(".css")) return "text/css";
@@ -716,8 +183,8 @@ String getContentType(String filename) {
 
 bool checkIfSystemIsAvailable() {
   if (!mikrotekConnectionSuccess) {
-    char* keys[] = { "status", "errorCode" };
-    char* values[] = { "false", "coin.slot.notavailable" };
+    String keys[] = { "status", "errorCode" };
+    String values[] = { "false", "insert.bottle.notavailable" };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 2));
     return false;
@@ -726,8 +193,8 @@ bool checkIfSystemIsAvailable() {
   }
 }
 
+// Check Internet Connection
 String INTERNET_CHECK_URL = "http://ifconfig.me";
-
 bool hasInternetConnect() {
   HTTPClient http;
 
@@ -737,24 +204,24 @@ bool hasInternetConnect() {
 
   if (httpCode > 0) {
     const String& payload = http.getString();
-    Serial.println("received payload:\n<<");
+    Serial.println("[CheckNet] received payload:\n<<");
     Serial.println(payload);
     Serial.println(">>");
-    Serial.println("Internet connection detected!");
+    Serial.println("[CheckNet] Internet connection detected!");
     http.end();
 
     return true;
   } else {
-    Serial.println("Internet connection not detected!");
-    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    Serial.println("[CheckNet] Internet connection not detected!");
+    Serial.printf("[CheckNet] [HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
     http.end();
 
     return false;
   }
 }
 
-void addAttemptToCoinslot() {
-  if (COINSLOT_BAN_COUNT > 0 && (!manualVoucher)) {
+void addAttemptToInsertBottle() {
+  if (BOTTLE_INSERT_BAN_COUNT > 0 && (!manualVoucher)) {
     int currentMacIndex = -1;
     int availableIndex = -1;
     for (int i = 0; i < attemptedMaxCount; i++) {
@@ -771,9 +238,9 @@ void addAttemptToCoinslot() {
     if (currentMacIndex > -1) {
       attempted[currentMacIndex].attemptCount++;
 
-      if (attempted[currentMacIndex].attemptCount >= COINSLOT_BAN_COUNT) {
+      if (attempted[currentMacIndex].attemptCount >= BOTTLE_INSERT_BAN_COUNT) {
         long curMil = millis();
-        attempted[currentMacIndex].unlockTime = curMil + (COINSLOT_BAN_MINUTES * 60000);
+        attempted[currentMacIndex].unlockTime = curMil + (INSERTBOTTLE_BAN_MINUTES * 60000);
         Serial.print("Unlock time: ");
         Serial.println(attempted[currentMacIndex].unlockTime);
       }
@@ -786,8 +253,8 @@ void addAttemptToCoinslot() {
   }
 }
 
-void clearAttemptToCoinSlot() {
-  if (COINSLOT_BAN_COUNT > 0) {
+void clearAttemptToInsertBottle() {
+  if (BOTTLE_INSERT_BAN_COUNT > 0) {
     for (int i = 0; i < attemptedMaxCount; i++) {
       if (attempted[i].mac == currentMacAttempt) {
         attempted[i].mac = "";
@@ -799,7 +266,7 @@ void clearAttemptToCoinSlot() {
   }
 }
 
-void checkCoin() {
+void checkBottle() {
 
   if (!checkIfSystemIsAvailable()) {
     return;
@@ -810,48 +277,48 @@ void checkCoin() {
     return;
   }
 
-  if (coinExpired) {
-    char* keys[] = { "status", "errorCode" };
-    char* values[] = { "false", "coins.wait.expired" };
+  if (bottleExpired) {
+    String keys[] = { "status", "errorCode" };
+    String values[] = { "false", "bottles.wait.expired" };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 2));
     return;
   }
 
-  if (!acceptCoin) {
-    totalCoin += processCoin;
+  if (!acceptBottle) {
+    totalBottle += processBottle;
     timeToAdd = calculateAddTime();
-    char* keys[] = { "status", "newCoin", "timeAdded", "totalCoin", "validity", "data" };
-    char coinStr[16];
-    itoa(processCoin, coinStr, 10);
+    String keys[] = { "status", "newBottle", "timeAdded", "totalBottle", "validity", "data" };
+    char bottleStr[16];
+    itoa(processBottle, bottleStr, 10);
     char timeToAddStr[16];
     itoa(timeToAdd, timeToAddStr, 10);
-    char totalCoinStr[16];
-    itoa(totalCoin, totalCoinStr, 10);
+    char totalBottleStr[16];
+    itoa(totalBottle, totalBottleStr, 10);
     char validityStr[16];
     itoa(currentValidity, validityStr, 10);
     char currentDataLimitStr[16];
     itoa(currentDataLimit, currentDataLimitStr, 10);
-    char* values[] = { "true", coinStr, timeToAddStr, totalCoinStr, validityStr, currentDataLimitStr };
-    activateCoinSlot();
+    String values[] = { "true", bottleStr, timeToAddStr, totalBottleStr, validityStr, currentDataLimitStr };
+    enableBottleDetection();
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 6));
   } else {
-    char* keys[] = { "status", "errorCode", "remainTime", "timeAdded", "totalCoin", "waitTime", "validity", "data" };
+    String keys[] = { "status", "errorCode", "remainTime", "timeAdded", "totalBottle", "waitTime", "validity", "data" };
     char remainTimeStr[20];
     long remain = targetMilis - millis();
     itoa(remain, remainTimeStr, 10);
     char timeToAddStr[16];
     itoa(timeToAdd, timeToAddStr, 10);
-    char totalCoinStr[16];
-    itoa(totalCoin, totalCoinStr, 10);
+    char totalBottleStr[16];
+    itoa(totalBottle, totalBottleStr, 10);
     char waitTimeStr[16];
-    itoa(MAX_WAIT_COIN_SEC, waitTimeStr, 10);
+    itoa(MAX_WAIT_BOTTLE_SEC, waitTimeStr, 10);
     char validityStr[16];
     itoa(currentValidity, validityStr, 10);
     char currentDataLimitStr[16];
     itoa(currentDataLimit, currentDataLimitStr, 10);
-    char* values[] = { "false", "coin.not.inserted", remainTimeStr, timeToAddStr, totalCoinStr, waitTimeStr, validityStr, currentDataLimitStr };
+    String values[] = { "false", "bottle.not.inserted", remainTimeStr, timeToAddStr, totalBottleStr, waitTimeStr, validityStr, currentDataLimitStr };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 8));
   }
@@ -860,46 +327,47 @@ void checkCoin() {
 void useVoucher() {
 
   if (!checkIfSystemIsAvailable()) {
+    Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
     return;
   }
 
   String voucher = server.arg("voucher");
   if (!validateVoucher(voucher)) {
+    Serial.printf("[%s] Invalid Voucher.\r\n", __FUNCTION__);
     return;
   }
-  disableCoinSlot();
+
+  disableBottleDetection();
+
   if (timeToAdd > 0) {
-    clearAttemptToCoinSlot();
-    //if(isNewVoucher){
+    clearAttemptToInsertBottle();
     registerNewVoucher(voucher);
-    //}
-    updateStatistic();
+    updateStatisticToEE();
     addTimeToVoucher(voucher, timeToAdd);
   } else {
-    addAttemptToCoinslot();
+    addAttemptToInsertBottle();
   }
-  char* keys[] = { "status", "totalCoin", "timeAdded", "validity" };
-  char totalCoinStr[16];
-  itoa(totalCoin, totalCoinStr, 10);
+  String keys[] = { "status", "totalBottle", "timeAdded", "validity" };
+  char totalBottleStr[16];
+  itoa(totalBottle, totalBottleStr, 10);
   char timeToAddStr[16];
   itoa(timeToAdd, timeToAddStr, 10);
   char validityStr[16];
   itoa(currentValidity, validityStr, 10);
-  char* values[] = { "true", totalCoinStr, timeToAddStr, validityStr };
-  printThankYou();
+  String values[] = { "true", totalBottleStr, timeToAddStr, validityStr };
   resetGlobalVariables();
   setupCORSPolicy();
-  acceptCoin = false;
+  acceptBottle = false;
   server.send(200, "application/json", toJson(keys, values, 4));
 }
 
-void updateStatistic() {
-  int lifeTimeCoinCount = eeGetInt(LIFETIME_COIN_COUNT_ADDRESS);
-  lifeTimeCoinCount += totalCoin;
-  eeWriteInt(LIFETIME_COIN_COUNT_ADDRESS, lifeTimeCoinCount);
-  int coinCount = eeGetInt(COIN_COUNT_ADDRESS);
-  coinCount += totalCoin;
-  eeWriteInt(COIN_COUNT_ADDRESS, coinCount);
+void updateStatisticToEE() {
+  int lifeTimeBottleCount = eeGetInt(LIFETIME_BOTTLE_COUNT_ADDRESS);
+  lifeTimeBottleCount += totalBottle;
+  eeWriteInt(LIFETIME_BOTTLE_COUNT_ADDRESS, lifeTimeBottleCount);
+  int bottleCount = eeGetInt(CURRENT_BOTTLE_COUNT_ADDRESS);
+  bottleCount += totalBottle;
+  eeWriteInt(CURRENT_BOTTLE_COUNT_ADDRESS, bottleCount);
   int customerCount = eeGetInt(CUSTOMER_COUNT_ADDRESS);
   customerCount++;
   eeWriteInt(CUSTOMER_COUNT_ADDRESS, customerCount);
@@ -907,8 +375,8 @@ void updateStatistic() {
 
 bool validateVoucher(String voucher) {
   if (voucher != currentActiveVoucher) {
-    char* keys[] = { "status", "errorCode" };
-    char* values[] = { "false", "coinslot.busy" };
+    String keys[] = { "status", "errorCode" };
+    String values[] = { "false", "insertbottle.busy" };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 2));
     return false;
@@ -919,27 +387,27 @@ bool validateVoucher(String voucher) {
 
 void topUp() {
   manualVoucher = false;
-  thankyou_cooldown = 5000;
   bool hasInternetConnection = true;
   if (CHECK_INTERNET_CONNECTION == 1) {
     hasInternetConnection = hasInternetConnect();
   }
   if (!hasInternetConnection) {
-    char* keys[] = { "status", "errorCode" };
-    char* values[] = { "false", "no.internet.detected" };
+    String keys[] = { "status", "errorCode" };
+    String values[] = { "false", "no.internet.detected" };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 2));
     return;
   }
 
   if (!checkIfSystemIsAvailable()) {
+    Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
     return;
   }
 
   String macAdd = server.arg("mac");
   if (!checkMacAddress(macAdd)) {
-    char* keys[] = { "status", "errorCode" };
-    char* values[] = { "false", "coin.slot.banned" };
+    String keys[] = { "status", "errorCode" };
+    String values[] = { "false", "insert.bottle.banned" };
     setupCORSPolicy();
     server.send(200, "application/json", toJson(keys, values, 2));
     return;
@@ -961,14 +429,14 @@ void topUp() {
       isNewVoucher = false;
     }
   }
-  char* keys[] = { "status", "voucher" };
+  String keys[] = { "status", "voucher" };
   int voucherLength = voucher.length() + 1;
   char voucherChar[voucherLength];
   voucher.toCharArray(voucherChar, voucherLength);
-  char* values[] = { "true", voucherChar };
+  String values[] = { "true", voucherChar };
   if (voucher != currentActiveVoucher) {
     resetGlobalVariables();
-    activateCoinSlot();
+    enableBottleDetection();
     currentActiveVoucher = voucher;
   }
   setupCORSPolicy();
@@ -977,7 +445,7 @@ void topUp() {
 
 boolean checkMacAddress(String mac) {
   bool isValid = true;
-  if (COINSLOT_BAN_COUNT > 0) {
+  if (BOTTLE_INSERT_BAN_COUNT > 0) {
     Serial.print("Checking mac if valid ");
     Serial.println(mac);
     for (int i = 0; i < attemptedMaxCount; i++) {
@@ -992,8 +460,8 @@ boolean checkMacAddress(String mac) {
         } else if (attempted[i].mac == mac) {
           Serial.print("Mac address has previous attempt");
           Serial.println(attempted[i].attemptCount);
-          Serial.println(COINSLOT_BAN_COUNT);
-          if (attempted[i].attemptCount >= COINSLOT_BAN_COUNT) {
+          Serial.println(BOTTLE_INSERT_BAN_COUNT);
+          if (attempted[i].attemptCount >= BOTTLE_INSERT_BAN_COUNT) {
             isValid = false;
             Serial.print(mac);
             Serial.println(" mac address currenly banned");
@@ -1004,40 +472,12 @@ boolean checkMacAddress(String mac) {
   }
   return isValid;
 }
-
-void setupCORSPolicy() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Max-Age", "10000");
-  server.sendHeader("Access-Control-Allow-Methods", "PUT,POST,GET,OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "*");
-  server.sendHeader("Access-Control-Allow-Credentials", "false");
-}
-
-void activateCoinSlot() {
-  // digitalWrite(COIN_SET_PIN, HIGH);
+void enableBottleDetection() {
   delay(200);
-  processCoin = 0;
-  acceptCoin = true;
-  coinSlotActive = true;
-  targetMilis = millis() + MAX_WAIT_COIN_SEC;
-  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_ON));
-}
-
-String toJson(char* keys[], char* values[], int nField) {
-  String json = "{";
-
-  for (int i = 0; i < nField; i++) {
-    if (i > 0) {
-      json += ",";
-    }
-    json += " \"";
-    json += String(keys[i]);
-    json += "\": \"";
-    json += String(values[i]);
-    json += "\" ";
-  }
-  json += "}";
-  return json;
+  processBottle = 0;
+  acceptBottle = true;
+  isBottleDetectionActive = true;
+  targetMilis = millis() + MAX_WAIT_BOTTLE_SEC;
 }
 
 String generateVoucher() {
@@ -1047,18 +487,19 @@ String generateVoucher() {
 }
 
 void registerNewVoucher(String voucher) {
-  String addCoinScript = "/ip hotspot user add name=";
-  addCoinScript += voucher;
-  addCoinScript += " limit-uptime=0 comment=0";
+  /* This adds a hotspot user */
+  String addHotspotUserScript = "/ip hotspot user add name=";
+  addHotspotUserScript += voucher;
+  addHotspotUserScript += " limit-uptime=0 comment=0";
   if (VOUCHER_LOGIN_OPTION == 1) {
-    addCoinScript += " password=";
-    addCoinScript += voucher;
+    addHotspotUserScript += " password=";
+    addHotspotUserScript += voucher;
   }
   if (VOUCHER_PROFILE != "" && VOUCHER_PROFILE != "default") {
-    addCoinScript += " profile=";
-    addCoinScript += VOUCHER_PROFILE;
+    addHotspotUserScript += " profile=";
+    addHotspotUserScript += VOUCHER_PROFILE;
   }
-  sendCommand(addCoinScript);
+  sendCommand(addHotspotUserScript);
 }
 
 void addTimeToVoucher(String voucher, int secondsToAdd) {
@@ -1073,7 +514,7 @@ void addTimeToVoucher(String voucher, int secondsToAdd) {
   script += "/ip hotspot user set limit-uptime=$nlu comment=\"";
   script += currentValidity;
   script += "m,";
-  script += String(totalCoin);
+  script += String(totalBottle);
   if (isNewVoucher) {
     script += ",0,";
   } else {
@@ -1102,6 +543,7 @@ void addTimeToVoucher(String voucher, int secondsToAdd) {
   }
 }
 
+/* RouterAP (Mikrotik) Send Command Function */
 void sendCommand(String script) {
   Serial.println(script);
   int scriptLength = script.length() + 1;
@@ -1109,32 +551,54 @@ void sendCommand(String script) {
   script.toCharArray(command, scriptLength);
   tc.sendCommand(command);
 }
+void setupCORSPolicy() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Max-Age", "10000");
+  server.sendHeader("Access-Control-Allow-Methods", "PUT,POST,GET,OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "*");
+  server.sendHeader("Access-Control-Allow-Credentials", "false");
+}
+
+String toJson(String keys[], String values[], int nField) {
+  String json = "{";
+
+  for (int i = 0; i < nField; i++) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += " \"";
+    json += String(keys[i]);
+    json += "\": \"";
+    json += String(values[i]);
+    json += "\" ";
+  }
+  json += "}";
+  return json;
+}
 
 void resetGlobalVariables() {
   currentActiveVoucher = "";
   timeToAdd = 0;
-  totalCoin = 0;
+  totalBottle = 0;
   currentDataLimit = 0;
   currentRateProfile = "";
 }
 
-void disableCoinSlot() {
-  coinSlotActive = false;
-  // digitalWrite(COIN_SET_PIN, LOW);
-  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
+void disableBottleDetection() {
+  isBottleDetectionActive = false;
 }
 
 int calculateAddTime() {
   int totalTime = 0;
   currentValidity = 0;
   currentDataLimit = 0;
-  int remainingCoin = totalCoin;
+  int remainingBottle = totalBottle;
   int highestPrice = 0;
-  while (remainingCoin > 0) {
+  while (remainingBottle > 0) {
     int candidatePrice = 0;
     int candidateIndex = -1;
     for (int i = 0; i < ratesCount; i++) {
-      if (rates[i].price <= remainingCoin) {
+      if (rates[i].price <= remainingBottle) {
         if (candidatePrice < rates[i].price) {
           candidatePrice = rates[i].price;
           candidateIndex = i;
@@ -1160,14 +624,21 @@ int calculateAddTime() {
       currentDataLimit += rates[candidateIndex].dataLimit;
 
       totalTime += rates[candidateIndex].minutes;
-      remainingCoin -= rates[candidateIndex].price;
+      remainingBottle -= rates[candidateIndex].price;
     } else {
       break;
     }
   }
   return totalTime * 60;
 }
+void handleSystemAbnormal() {
+  Serial.println("AP disconnected!!!!!!!!!!!!!!!");
+  mikrotekConnectionSuccess = false;
 
+  //Reconnect after 30 seconds
+  delay(30000);
+  ESP.restart();
+}
 void populateSystemConfiguration() {
   //Read atleast 4 bytes on system.data offset in EEPROM
   int backupLength = eeGetInt(BACKUP_CONFIG_LENGTH_INDEX);
@@ -1285,29 +756,65 @@ void populateSystemConfiguration() {
   SERVO_1_ACW_VAL = rows[29].toInt();    //servo1AntiClockwiseVal
   DEBUGLED_1_PIN = rows[30].toInt();
 
-  /* End system.data parse */
+  /* End parse system.data */
 }
 
+bool activateManualVoucherPurchase() {
+  bool hasInternetConnection = true;
+  if (CHECK_INTERNET_CONNECTION == 1) {
+    hasInternetConnection = hasInternetConnect();
+  }
+  if (!hasInternetConnection) {
+    Serial.printf("[%s] No Internet Connection.\r\n", __FUNCTION__);
+    return false;
+  }
 
-int split(String rows[], String data, char delimeter) {
-  int count = 0;
-  String elementData = "";
-  for (int i = 0; i < data.length(); i++) {
-    if (data.charAt(i) != delimeter) {
-      elementData.concat(data.charAt(i));
-    } else {
-      rows[count] = elementData;
-      elementData = "";
-      count++;
+  if (!checkIfSystemIsAvailable()) {
+    Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
+    return false;
+  }
+
+  currentMacAttempt = currentMacAddress;
+  currentValidity = 0;
+  isNewVoucher = true;
+  resetGlobalVariables();
+  enableBottleDetection();
+  currentActiveVoucher = generateVoucher();
+  manualVoucher = true;
+  //show 30 sec the voucher code
+  return true;
+}
+
+void handleGenerateVouchers() {
+
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+  int amount = server.arg("amt").toInt();
+  int qty = server.arg("qty").toInt();
+  int addToSales = server.arg("sales").toInt();
+  String prefix = server.arg("pfx");
+  String voucherGenerated = "";
+
+  for (int i = 0; i < qty; i++) {
+    int randomNumber = random(1000, 9999);
+    String voucher = prefix + String(randomNumber);
+    totalBottle = amount;
+    timeToAdd = calculateAddTime();
+    registerNewVoucher(voucher);
+    if (addToSales == 1) {
+      updateStatisticToEE();
     }
+    addTimeToVoucher(voucher, timeToAdd);
+    if (i > 0) {
+      voucherGenerated += "#";
+    }
+    voucherGenerated += voucher;
   }
-  if (elementData != "") {
-    rows[count] = elementData;
-    count++;
-  }
-  return count;
+  String returnData = vendorName + "|" + amount + "|" + String(timeToAdd) + "|" + voucherGenerated;
+  server.send(200, "text/pain", returnData);
 }
-
 
 void populateRates() {
 
@@ -1333,24 +840,597 @@ void populateRates() {
     rates[i].profileName = column[5];
   }
 }
+void loginMirotik() {
 
-int coinWaiting = 0;
-long lastLinkStatusCheck = 0;
+  //WHICH CHARACTER SHOULD BE INTERPRETED AS "PROMPT"?
+  tc.setPromptChar('>');
 
+  //this is to trigger manually the login
+  //since it could be a problem to attach the serial monitor while negotiating with the server (it cause the board reset)
+  //remove it or replace it with a delay/wait of a digital input in case you're not using the serial monitors
+  Serial.print("Logging in to mikrotik ");
+  Serial.print(mikrotikRouterIp);
+  Serial.print(" using ");
+  Serial.print(user);
+  Serial.print(" / ");
+  Serial.println(pwd);
+  delay(3000);
+
+  //PUT HERE YOUR USERNAME/PASSWORD
+  mikrotekConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
+  if (mikrotekConnectionSuccess) {
+    Serial.println("Login to mikrotek router success");
+  } else {
+    //Temporary fix for those cannot connect to mikrotik
+    mikrotekConnectionSuccess = true;
+    Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
+  }
+}
+/*
+ *  EEPROM Handling Functions
+ */
+void eeWriteInt(int pos, int val) {
+  byte* p = (byte*)&val;
+  EEPROM.write(pos, *p);
+  EEPROM.write(pos + 1, *(p + 1));
+  EEPROM.write(pos + 2, *(p + 2));
+  EEPROM.write(pos + 3, *(p + 3));
+  EEPROM.commit();
+}
+
+void eeWriteString(int addr, String val) {
+  int str_len = val.length() + 1;
+  for (int i = addr; i < str_len + addr; ++i) {
+    EEPROM.write(i, val.charAt(i - addr));
+  }
+  EEPROM.write(str_len + addr, '\0');
+  EEPROM.commit();
+}
+
+String eeReadString(int addr, int str_len) {
+  String val = "";
+  for (int i = addr; i < str_len + addr; ++i) {
+    val += String(char(EEPROM.read(i)));
+  }
+  return val;
+}
+
+/* Read atleast 4 bytes */
+int eeGetInt(int pos) {
+  int val;
+  byte* p = (byte*)&val;
+  *p = EEPROM.read(pos);
+  *(p + 1) = EEPROM.read(pos + 1);
+  *(p + 2) = EEPROM.read(pos + 2);
+  *(p + 3) = EEPROM.read(pos + 3);
+  if (val < 0) {
+    return 0;
+  } else {
+    return val;
+  }
+}
+/* End of EEPROM Handling Functions */
+
+/*
+ * Filesystem-related Functions
+ */
+bool handleFileRead(String path) {  // send the right file to the client (if it exists)
+  Serial.println("handleFileRead: " + path);
+  if (path.endsWith("/")) path += "index.html";  // If a folder is requested, send the index file
+  String contentType = getContentType(path);     // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) {  // If the file exists, either as a compressed archive, or normal
+    if (LittleFS.exists(pathWithGz))                           // If there's a compressed version available
+      path += ".gz";                                           // Use the compressed version
+    File file = LittleFS.open(path, "r");                      // Open the file
+    size_t sent = server.streamFile(file, contentType);        // Send it to the client
+    file.close();                                              // Close the file again
+    Serial.println(String("\tSent file: ") + path);
+    return true;
+  }
+  Serial.println(String("\tFile Not Found: ") + path);
+  return false;  // If the file doesn't exist, return false
+}
+
+bool handleFileWrite(String path, String content) {  // send the right file to the client (if it exists)
+  Serial.println("handleFileWrite: " + path);
+  if (LittleFS.exists(path)) {
+    File file = LittleFS.open(path, "w");
+    int bytesWritten = file.print(content);
+    if (bytesWritten <= 0) {
+      return false;
+    }
+    file.close();
+    Serial.println(String("Write file: ") + path);
+    return true;
+  }
+  Serial.println(String("\tFile Not Found: ") + path);
+  return false;  // If the file doesn't exist, return false
+}
+
+String readFile(String path) {
+  String result;
+  if (LittleFS.exists(path)) {
+    File file = LittleFS.open(path, "r");
+    String content = file.readStringUntil('\n');
+    file.close();
+    return content;
+  }
+  return result;
+}
+/* End of Filesystem-related functions */
+
+/* 
+ * Webserver Handling Functions
+ */
+
+ void handleJquerySript() {
+  handleFileRead("/admin/js/jquery.min.js");
+}
+
+void handleUserGetRates() {
+  setupCORSPolicy();
+  handleFileRead("/admin/config/rates.data");
+}
+
+void handleAdminGetRates() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+  handleFileRead("/admin/config/rates.data");
+}
+
+void handleAdminSaveRates() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  String data = server.arg("data");
+  handleFileWrite("/admin/config/rates.data", data);
+  populateRates();
+  server.send(200, "text/plain", "ok");
+}
+
+void handleAdminSaveSystemConfig() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  String data = server.arg("data");
+  handleFileWrite("/admin/config/system.data", data);
+  server.send(200, "text/plain", "ok");
+  delay(2000);
+  ESP.restart();
+}
+
+void handleAdminGetSystemConfig() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  handleFileRead("/admin/config/system.data");
+}
+
+void handleAdminResetStats() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  String type = server.arg("type");
+  if (type == "lifeTimeCount") {
+    eeWriteInt(LIFETIME_BOTTLE_COUNT_ADDRESS, 0);
+  } else if (type == "bottleCount") {
+    eeWriteInt(CURRENT_BOTTLE_COUNT_ADDRESS, 0);
+  } else if (type == "customerCount") {
+    eeWriteInt(CUSTOMER_COUNT_ADDRESS, 0);
+  }
+  server.send(200, "text/plain", "ok");
+}
+
+void handleAdminDashboard() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  long upTime = millis();
+  int lifeTimeBottleCount = eeGetInt(LIFETIME_BOTTLE_COUNT_ADDRESS);
+  int bottleCount = eeGetInt(CURRENT_BOTTLE_COUNT_ADDRESS);
+  int customerCount = eeGetInt(CUSTOMER_COUNT_ADDRESS);
+  bool hasInternetConnection = true;
+  if (CHECK_INTERNET_CONNECTION == 1) {
+    hasInternetConnection = hasInternetConnect();
+  }
+  String data = "";
+  data += String(upTime);
+  data += String("|");
+  data += String(lifeTimeBottleCount);
+  data += String("|");
+  data += String(bottleCount);
+  data += String("|");
+  data += String(customerCount);
+  data += String("|");
+  if (hasInternetConnection) {
+    data += String("1");
+  } else {
+    data += String("0");
+  }
+  data += String("|");
+  if (mikrotekConnectionSuccess) {
+    data += String("1");
+  } else {
+    data += String("0");
+  }
+  data += String("|");
+  data += currentMacAddress;
+  data += String("|");
+  data += currentIpAddress;
+  data += String("|");
+  data += HARDWARE_TYPE;
+  data += String("|");
+  data += CURRENT_VERSION;
+
+  server.send(200, "text/plain", data);
+}
+
+void handleAdminPage() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  handleFileRead("/admin/system-config.html");
+}
+
+void handleAdminGeneratedVoucherPage() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  handleFileRead("/admin/voucher-generate.html");
+}
+
+
+
+bool isAuthorized() {
+  String auth = server.header("Authorization");
+  String expectedAuth = "Basic " + adminAuth;
+  if (auth != expectedAuth) {
+    Serial.print("Admin incorrect: ");
+    Serial.print(auth);
+    Serial.print(" vs ");
+    Serial.println(expectedAuth);
+  }
+  return auth == expectedAuth;
+}
+
+void handleNotAuthorize() {
+  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
+  server.send(401, "text/html", "<html>Authentication failed</html>");
+}
+
+boolean hasUploadError = false;
+boolean isFileSystem = true;
+
+void handleFileUploadRequest() {
+  if (Update.hasError()) {
+    server.send(200, F("text/html"), "Upload has error");
+  } else {
+    server.client().setNoDelay(true);
+    server.send_P(200, PSTR("text/html"), "Upload done");
+    delay(100);
+    server.client().stop();
+    ESP.restart();
+  }
+}
+
+ //Taken from https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPUpdateServer/src/ESP8266HTTPUpdateServer-impl.h
+void handleFileUploadStream() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    if (!isAuthorized()) {
+      handleNotAuthorize();
+      return;
+    }
+    if (upload.name == "filesystem") {
+      isFileSystem = true;
+      backupSystemConfig();
+      size_t fsSize = ((size_t)&_FS_end - (size_t)&_FS_start);
+      close_all_fs();
+      if (!Update.begin(fsSize, U_FS)) {  //start with max available size
+        Serial.println("Upload filesystem start failed");
+        hasUploadError = true;
+      }
+    } else {
+      uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+      if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
+        Serial.println("Upload sketch start failed");
+        hasUploadError = true;
+      }
+    }
+  } else if (upload.status == UPLOAD_FILE_WRITE && !hasUploadError) {
+    Serial.printf(".");
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+      Serial.println("Upload write failed");
+      hasUploadError = true;
+    }
+  } else if (upload.status == UPLOAD_FILE_END && !hasUploadError) {
+    if (Update.end(true)) {  //true to set the size to the current progress
+      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+    } else {
+      Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    Update.end();
+    hasUploadError = true;
+    Serial.println("Upload aborted");
+  }
+  delay(0);
+}
+
+void backupSystemConfig() {
+  Serial.println("Starting to backup system.data");
+  String data = readFile("/admin/config/system.data");
+  int len = data.length();
+  eeWriteInt(BACKUP_CONFIG_LENGTH_INDEX, len);
+  eeWriteString(BACKUP_CONFIG_LENGTH_INDEX + 5, data);
+}
+
+void handleNotFound() {
+  Serial.println("preflight....");
+  if (server.method() == HTTP_OPTIONS) {
+    Serial.println("Preflight request....");
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Max-Age", "10000");
+    server.sendHeader("Access-Control-Allow-Methods", "PUT,POST,GET,OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "*");
+    server.sendHeader("Access-Control-Allow-Credentials", "false");
+    server.send(204);
+  } else {
+    server.send(404, "text/plain", "");
+  }
+}
+
+void handleHealth() {
+  setupCORSPolicy();
+  server.send(200, "text/plain", "ok");
+}
+
+void handleLogout() {
+  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
+  server.send(401, "text/html", "<html>Authentication failed</html>");
+}
+
+void testInsertBottle() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+  String data = server.arg("bottle");
+  if (isBottleDetectionActive) {
+    bottle += data.toInt();
+    bottlesChange = 1;
+  }
+  server.send(200, "text/plain", "ok");
+}
+
+void handleCancelTopUp() {
+
+  if (!checkIfSystemIsAvailable()) {
+    Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
+    return;
+  }
+  String voucher = server.arg("voucher");
+  if (!validateVoucher(voucher)) {
+    return;
+  }
+  targetMilis = millis();
+  String keys[] = { "status" };
+  String values[] = { "true" };
+  setupCORSPolicy();
+  server.send(200, "application/json", toJson(keys, values, 1));
+}
+/* End of Webserver-handling Functions */
+
+/*
+ * Miscellanous Functions
+ * These do not affect primary logic of the code.
+ */
+
+// split() for tokenization of data
+int split(String rows[], String data, char delimeter) {
+  int count = 0;
+  String elementData = "";
+  for (int i = 0; i < data.length(); i++) {
+    if (data.charAt(i) != delimeter) {
+      elementData.concat(data.charAt(i));
+    } else {
+      rows[count] = elementData;
+      elementData = "";
+      count++;
+    }
+  }
+  if (elementData != "") {
+    rows[count] = elementData;
+    count++;
+  }
+  return count;
+} // split() end
+
+/* End of Miscellanous Functions */
+
+/* Start of setup() */
+void setup() {
+
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println();
+  Serial.println();
+  delay(300);           // Wait for 'stabilize' serial
+  
+  EEPROM.begin(512);
+  if (!LittleFS.begin()) {
+    Serial.println("An Error has occurred while mounting LittleFS");
+    return;
+  }
+  populateSystemConfiguration();
+
+  pinMode(SENSOR_1_PIN, INPUT_PULLUP);
+  pinMode(SENSOR_2_PIN, INPUT_PULLUP);
+  pinMode(SENSOR_3_PIN, INPUT_PULLUP);
+  pinMode(DEBUGLED_1_PIN, OUTPUT);
+  pinMode(DEBUGLED_2_PIN, OUTPUT);
+  pinMode(SERVO_1_PIN, OUTPUT);
+
+  //Debug Only
+  digitalWrite(DEBUGLED_1_PIN, HIGH);
+
+  // We start by connecting to a WiFi network
+  WiFi.mode(WIFI_STA);
+
+  //for static ip configuration
+  if (IP_ADDRESS_MODE == 1) { //Static instead of DHCP
+    Serial.print("[Wifi Client] Using static ip address");
+    Serial.println(local_IP);
+    WiFi.config(local_IP, primaryDNS, gateway, subnet);
+  }
+
+  WiFi.begin(ssid.c_str(), password.c_str());
+
+  Serial.println();
+  Serial.println();
+  Serial.print("[Wifi Client] Wait for WiFi, connecting to RouterAP: ");
+  Serial.print(ssid);
+  Serial.println();
+
+  int second = 0;
+  
+  // Wifi Client - Establish Connection
+  if (SETUP_FINISH == 1) {
+    while (second <= WIFI_CONNECT_TIMEOUT) {
+      networkConnected = (WiFi.status() == WL_CONNECTED);
+      Serial.print(".");
+      if (networkConnected) {
+        break;
+      }
+      delay(WIFI_CONNECT_DELAY);
+      second += WIFI_CONNECT_DELAY;
+    }
+    currentIpAddress = WiFi.localIP().toString().c_str();
+    currentMacAddress = WiFi.macAddress();
+  } 
+  // End of Wifi Client - Establish Connection
+  else {
+    Serial.println("Initial setup detected, no need to connect to RouterAP");
+    networkConnected = false;
+  }
+
+  // Wifi Client - Connected
+  if (networkConnected) {
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.print("IP address: ");
+    Serial.println(currentIpAddress);
+    Serial.print("Mac address: ");
+    Serial.println(currentMacAddress);
+    Serial.println("Connecting.... ");
+    Serial.print("Attaching interrupt ");
+
+    //Attach Interrupt Here
+    attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
+    // attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2Asserted, RISING);
+    // attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3Asserted, RISING);
+    loginMirotik();
+
+    if (MDNS.begin("esp8266")) {
+      Serial.println("MDNS responder started");
+    }
+
+    // Webserver Setup but only when connected 
+    server.on("/topUp", topUp);
+    server.on("/checkBottle", checkBottle);
+    server.on("/useVoucher", useVoucher);
+    server.on("/health", handleHealth);
+    server.on("/getRates", handleUserGetRates);
+    server.on("/cancelTopUp", handleCancelTopUp);
+    server.on("/testInsertBottle", testInsertBottle);
+    server.onNotFound(handleNotFound);
+  } //End of Wifi Client - Connected
+  //Soft AP setup 
+  else {
+    
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+    WiFi.softAP("Sapientia Wifi Setup");
+
+    //if DNSServer is started with "*" for domain name, it will reply with
+    //provided IP to all DNS request
+    dnsServer.start(DNS_PORT, "*", apIP);
+
+    server.onNotFound([]() {
+      server.sendHeader("Location", String("/admin"), true);
+      server.send(302, "text/plain", "");
+    });
+  } //End of Soft AP setup
+
+  // Webserver Setup for both Wifi Mode. (Means always available to user)
+  server.on("/admin/api/dashboard", handleAdminDashboard);
+  server.on("/admin/js/jquery.min.js", handleJquerySript);
+  server.on("/admin/api/resetStatistic", handleAdminResetStats);
+  server.on("/admin/api/saveSystemConfig", handleAdminSaveSystemConfig);
+  server.on("/admin/api/getSystemConfig", handleAdminGetSystemConfig);
+  server.on("/admin/api/getRates", handleAdminGetRates);
+  server.on("/admin/api/saveRates", handleAdminSaveRates);
+  server.on("/admin/api/logout", handleLogout);
+  server.on("/admin/api/generateVouchers", handleGenerateVouchers);
+  server.on("/admin", handleAdminPage);
+  server.on("/admin/viewGeneratedVouchers", handleAdminGeneratedVoucherPage);
+  server.on("/admin/updateMainBin", HTTP_POST, handleFileUploadRequest, handleFileUploadStream);
+
+  // Populate Rates based on rates.data
+  populateRates();
+
+  server.begin();
+
+  if (mikrotekConnectionSuccess) {
+    Serial.println("RouterAP Connected Successfully!");
+    digitalWrite(DEBUGLED_1_PIN, HIGH);
+  } 
+}
+/* End of setup() */
+
+/*
+ * loop()
+ */
+int _test_init = 1;
 void loop() {
+
+  if(_test_init) {
+    Serial.print("Entered loop()");
+    _test_init = 0;
+  }
+
+  while(1) {
+  server.handleClient();
+  MDNS.update();
+  if (sensor1Active)
+  {
+    Serial.printf("Sensor 1 Activated at %s\r\n", __FUNCTION__);
+    sensor1Active = 0;
+  }
+  };
+  //
   if (networkConnected) {
     unsigned long currentMilis = millis();
 
     //handling for disconnection of AP
     bool linkStatusOff = false;
-
-// #ifdef ESP32
-//     //check ethernet status every 2 sec
-//     if (currentMilis > lastLinkStatusCheck + 2000) {
-//       linkStatusOff = Ethernet.linkStatus() == LinkOFF;
-//       lastLinkStatusCheck = currentMilis;
-//     }
-// #endif
 
     if (!client.connected() || linkStatusOff) {
       handleSystemAbnormal();
@@ -1358,101 +1438,54 @@ void loop() {
       return;
     }
 
-    //insert button led will work only when have lcd
-    if (LCD_TYPE > 0) {
-      int insertCoinButton = 0;//digitalRead(INSERT_COIN_BTN_PIN);
-      if (insertCoinButton == LOW) {
-        printPleaseWait();
-        if (!manualVoucher) {
-          if (welcomePrinted) {
-            bool result = activateManualVoucherPurchase();
-            if (!result) {
-              //when no internet available, return back to normal to try later
-              lastSaleTime = millis();
-              thankyou_cooldown = 5000;
-              welcomePrinted = false;
-              return;
-            }
-          } else {
-            if (timeToAdd == 0) {
-              //clear thank you message after button press
-              thankyou_cooldown = 0;
-              targetMilis = currentMilis;
-              delay(1000);
-            }
-          }
-        } else {
-          //make coinslot expired when button is pressed
-          targetMilis = currentMilis;
-        }
-      }
-    }
-
-    //insert coin logic
-    if (acceptCoin) {
+    //insert Bottle logic
+    if (acceptBottle) {
       if ((targetMilis > currentMilis)) {
-        coinExpired = false;
-        //wait for the coin to insert
-        if (coinsChange > 0) {
-          //delay(1500); change delay to coin waiting logic to prevent hanging of LCD
-          if (coinWaiting == 0) {
-            coinWaiting = currentMilis + 700;
+        bottleExpired = false;
+        //wait for the bottle to insert
+        if (bottlesChange > 0) {
+          if (bottleWaiting == 0) {
+            bottleWaiting = currentMilis + 700;
           }
-
-          if (coinWaiting > currentMilis) {
-            goto printing;
+          if (bottleWaiting > currentMilis) {
           }
-
-          coinWaiting = 0;
-          processCoin = coin;
-          coin -= processCoin;
-          Serial.print("Coin inserted: ");
-          Serial.println(processCoin);
-          coinsChange = 0;
-          acceptCoin = false;
+          bottleWaiting = 0;
+          processBottle = bottle;
+          bottle -= processBottle;
+          Serial.print("Bottle inserted: ");
+          Serial.println(processBottle);
+          bottlesChange = 0;
+          acceptBottle = false;
 
           //if manual voucher mode
           if (manualVoucher) {
-            totalCoin += processCoin;
+            totalBottle += processBottle;
             timeToAdd = calculateAddTime();
-            activateCoinSlot();
+            enableBottleDetection();
           }
         }
-printing:
-        if (timeToAdd > 0) {
-          printTransactionDetail();
-        } else {
-          printInsertCoinNow();
-        }
       } else {
-        disableCoinSlot();
-        acceptCoin = false;
-        coinExpired = true;
+        disableBottleDetection();
+        acceptBottle = false;
+        bottleExpired = true;
         manualVoucher = false;
         timeToAdd = calculateAddTime();
         //Auto add time no need to use voucher
         if (timeToAdd > 0) {
-          clearAttemptToCoinSlot();
-          Serial.print("Coin insert waiting expired, Auto using the voucher ");
+          clearAttemptToInsertBottle(); 
+          Serial.print("Bottle insert waiting expired, Auto using the voucher ");
           Serial.print(currentActiveVoucher);
           if (isNewVoucher) {
             registerNewVoucher(currentActiveVoucher);
           }
-          updateStatistic();
+          updateStatisticToEE();
           addTimeToVoucher(currentActiveVoucher, timeToAdd);
-          printThankYou();
         } else {
-          addAttemptToCoinslot();
+          addAttemptToInsertBottle();
         }
         resetGlobalVariables();
       }
     } else {
-      //if coinslot is disable
-      //print welcome again after x seconds after thank you message
-      if (targetMilis < currentMilis && currentMilis > (lastSaleTime + thankyou_cooldown)) {
-        welcomePrinted = true;
-        printWelcome();
-      }
     }
   } else {
     unsigned long currentMilis = millis();
@@ -1465,312 +1498,5 @@ printing:
     }
     dnsServer.processNextRequest();
   }
-  server.handleClient();
-  MDNS.update();
 }
-
-void handleSystemAbnormal() {
-  Serial.println("AP disconnected!!!!!!!!!!!!!!!");
-  mikrotekConnectionSuccess = false;
-  printSystemNotAvailable();
-  // digitalWrite(INSERT_COIN_LED, evaluateTriggerOutput(TURN_OFF));
-  // digitalWrite(SYSTEM_READY_LED, evaluateTriggerOutput(TURN_OFF));
-  //Reconnect after 30 seconds
-  delay(30000);
-  ESP.restart();
-}
-
-void printInsertCoinNow() {
-  if (LCD_TYPE > 0) {
-    long currentMilis = millis();
-    //print only after 1 second to avoid performance issue
-    if (currentMilis > (lastPrinted + 1000)) {
-      long remain = targetMilis - currentMilis;
-      welcomePrinted = false;
-
-
-      if (LCD_TYPE == 1) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Pls insert");
-        lcd.setCursor(14, 0);
-        lcd.print(String(remain / 1000));
-        lcd.setCursor(0, 1);
-        lcd.print("coin now, 1/5/10");
-      } else if (LCD_TYPE == 2) {
-        lcd20x4.clear();
-        lcd20x4.setCursor(startCenterIndex(vendorName), 0);
-        lcd20x4.print(vendorName);
-        lcd20x4.setCursor(0, 1);
-        lcd20x4.print("Pls insert");
-        lcd20x4.setCursor(18, 1);
-        lcd20x4.print(String(remain / 1000));
-        lcd20x4.setCursor(0, 2);
-        lcd20x4.print("coin now, 1/5/10");
-      }
-      lastPrinted = currentMilis;
-    }
-  }
-}
-
-void printTransactionDetail() {
-  if (LCD_TYPE > 0) {
-    long currentMilis = millis();
-    //print only after 1 second to avoid performance issue
-    if (currentMilis > (lastPrinted + 1000)) {
-      long remain = targetMilis - currentMilis;
-      int days = timeToAdd / (3600 * 24);
-      int hr = timeToAdd % (3600 * 24) / 3600;
-      int min = timeToAdd % 3600 / 60;
-
-
-
-      if (LCD_TYPE == 1) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("PHP: " + String(totalCoin) + " ");
-        lcd.setCursor(14, 0);
-        lcd.print(String(remain / 1000));
-        lcd.setCursor(0, 1);
-        String t = "T: ";
-        t += String(days);
-        t += "d ";
-        t += String(hr);
-        t += "h ";
-        t += String(min);
-        t += "m ";
-        lcd.print(t);
-      } else if (LCD_TYPE == 2) {
-        lcd20x4.clear();
-        lcd20x4.setCursor(startCenterIndex(vendorName), 0);
-        lcd20x4.print(vendorName);
-        lcd20x4.setCursor(0, 1);
-        lcd20x4.print("PHP: " + String(totalCoin) + " ");
-        lcd20x4.setCursor(18, 1);
-        lcd20x4.print(String(remain / 1000));
-        lcd20x4.setCursor(0, 2);
-        String t = "T: ";
-        t += String(days);
-        t += "day ";
-        t += String(hr);
-        t += "hr ";
-        t += String(min);
-        t += "min ";
-        lcd20x4.print(t);
-      }
-      lastPrinted = currentMilis;
-    }
-  }
-}
-
-void printThankYou() {
-  if (LCD_TYPE > 0) {
-    welcomePrinted = false;
-    if (LCD_TYPE == 1) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Code: " + currentActiveVoucher);
-      lcd.setCursor(0, 1);
-      lcd.print("Thank you!");
-    } else if (LCD_TYPE == 2) {
-      lcd20x4.clear();
-      lcd20x4.setCursor(startCenterIndex(vendorName), 0);
-      lcd20x4.print(vendorName);
-      lcd20x4.setCursor(0, 1);
-      lcd20x4.print("Code: " + currentActiveVoucher);
-      String thankYouText = "Thank you!";
-      lcd20x4.setCursor(startCenterIndex(vendorName), 2);
-      lcd20x4.print(thankYouText);
-    }
-
-    lastSaleTime = millis();
-  }
-}
-
-long lastWelcome = 0;
-int welcomeBlinkState = 0;
-int currentIndex = 0;
-void printWelcome() {
-  long currentMilis = millis();
-  if (LCD_TYPE > 0 && currentMilis > (lastWelcome + 500)) {
-
-    if (LCD_TYPE == 1) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Welcome to");
-      lcd.setCursor(0, 1);
-      if (welcomeBlinkState == 0) {
-        lcd.print(vendorName);
-        welcomeBlinkState = 1;
-      } else if (welcomeBlinkState == 1) {
-        lcd.print("");
-        welcomeBlinkState = 0;
-      }
-    } else if (LCD_TYPE == 2) {
-      String text = "Welcome to";
-      lcd20x4.clear();
-      lcd20x4.setCursor(startCenterIndex(text), 0);
-      lcd20x4.print(text);
-      text = vendorName;
-      lcd20x4.setCursor(startCenterIndex(text), 1);
-      if (welcomeBlinkState == 0) {
-        lcd20x4.print(text);
-        welcomeBlinkState = 1;
-      } else if (welcomeBlinkState == 1) {
-        lcd20x4.print("");
-        welcomeBlinkState = 0;
-      }
-      lcd20x4.setCursor(0, 3);
-      String message = "                    ";
-      int l = 0;
-      for (int i = currentIndex; i < 20; i++) {
-        if (l < MARQUEE_MESSAGE.length()) {
-          message[i] = MARQUEE_MESSAGE[l];
-          l++;
-        }
-      }
-      int a = l;
-      for (int i = 0; i < (MARQUEE_MESSAGE.length() - l); i++) {
-        message[i] = MARQUEE_MESSAGE[a];
-        a++;
-      }
-      lcd20x4.print(message);
-      currentIndex++;
-      if (currentIndex >= 20) {
-        currentIndex = 0;
-      }
-    }
-    lastWelcome = currentMilis;
-  }
-}
-
-bool activateManualVoucherPurchase() {
-  bool hasInternetConnection = true;
-  if (CHECK_INTERNET_CONNECTION == 1) {
-    hasInternetConnection = hasInternetConnect();
-  }
-  if (!hasInternetConnection) {
-    printInternetNotAvailable();
-    return false;
-  }
-
-  if (!checkIfSystemIsAvailable()) {
-    printSystemNotAvailable();
-    return false;
-  }
-
-  currentMacAttempt = currentMacAddress;
-  currentValidity = 0;
-  isNewVoucher = true;
-  resetGlobalVariables();
-  activateCoinSlot();
-  currentActiveVoucher = generateVoucher();
-  manualVoucher = true;
-  //show 30 sec the voucher code
-  thankyou_cooldown = 30000;
-  return true;
-}
-
-void handleGenerateVouchers() {
-
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-  int amount = server.arg("amt").toInt();
-  int qty = server.arg("qty").toInt();
-  int addToSales = server.arg("sales").toInt();
-  String prefix = server.arg("pfx");
-  String voucherGenerated = "";
-  printPleaseWait();
-  for (int i = 0; i < qty; i++) {
-    int randomNumber = random(1000, 9999);
-    String voucher = prefix + String(randomNumber);
-    totalCoin = amount;
-    timeToAdd = calculateAddTime();
-    registerNewVoucher(voucher);
-    if (addToSales == 1) {
-      updateStatistic();
-    }
-    addTimeToVoucher(voucher, timeToAdd);
-    if (i > 0) {
-      voucherGenerated += "#";
-    }
-    voucherGenerated += voucher;
-  }
-  String returnData = vendorName + "|" + amount + "|" + String(timeToAdd) + "|" + voucherGenerated;
-  server.send(200, "text/pain", returnData);
-}
-
-void printSystemNotAvailable() {
-
-  if (LCD_TYPE > 0) {
-
-    if (LCD_TYPE == 1) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("System not");
-      lcd.setCursor(0, 1);
-      lcd.print("Available");
-    } else if (LCD_TYPE == 2) {
-      String text = "System not";
-      lcd20x4.clear();
-      lcd20x4.setCursor(startCenterIndex(text), 1);
-      lcd20x4.print(text);
-      text = "Available";
-      lcd20x4.setCursor(startCenterIndex(text), 2);
-      lcd20x4.print(text);
-    }
-  }
-}
-
-void printInternetNotAvailable() {
-
-  if (LCD_TYPE > 0) {
-    if (LCD_TYPE == 1) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Internet not");
-      lcd.setCursor(0, 1);
-      lcd.print("Available");
-    } else if (LCD_TYPE == 2) {
-      String text = "Internet not";
-      lcd20x4.clear();
-      lcd20x4.setCursor(startCenterIndex(text), 1);
-      lcd20x4.print(text);
-      text = "Available";
-      lcd20x4.setCursor(startCenterIndex(text), 2);
-    }
-  }
-}
-
-void printPleaseWait() {
-
-  if (LCD_TYPE > 0) {
-    if (LCD_TYPE == 1) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Please wait...");
-      lcd.setCursor(0, 1);
-      lcd.print("");
-    } else if (LCD_TYPE == 2) {
-      lcd20x4.clear();
-      lcd20x4.setCursor(startCenterIndex(vendorName), 0);
-      lcd20x4.print(vendorName);
-      String text = "Please wait...";
-      lcd20x4.setCursor(startCenterIndex(text), 1);
-      lcd20x4.print(text);
-    }
-  }
-}
-
-int startCenterIndex(String text) {
-  int totalSize = 20;
-  int textLength = text.length();
-  int blankCharCount = totalSize - textLength;
-  int startCenterIndex = (blankCharCount / 2);
-  if (blankCharCount % 2 != 0) {
-    startCenterIndex--;
-  }
-  return startCenterIndex;
-}
+/* End of loop() */
