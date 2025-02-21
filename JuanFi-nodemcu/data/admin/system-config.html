@@ -6,7 +6,7 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
   background-color: #4b4b4b;
-  padding: 50px
+  padding: 5px
 }
 
 .topnav {
@@ -68,10 +68,10 @@ body {
 }
 
 .main-container {
-	border: 50px solid #3C3D37;
+	border: 5px solid #3C3D37;
 	max-width: 800px;
 	margin: auto;
-	padding: 20px;
+	padding: 10px;
 	background-color: #3C3D37
 }
 
@@ -586,6 +586,9 @@ function saveSystemConfig(){
 	var sensor2AssertVal = $('#sensor2AssertVal').val();
 	var sensor3AssertVal = $('#sensor3AssertVal').val();
 
+	var servo1ClockwiseVal =  $('#servo1ClockwiseVal').val();
+	var servo2ClockwiseVal =  $('#servo2ClockwiseVal').val();
+	
 	var pinMap = [];
 	pinMap['Sensor 1 Pin'] = sensor1Pin;
 	pinMap['Sensor 2 Pin'] = sensor2Pin;
@@ -760,7 +763,7 @@ function openDashboard(evt){
 		}, 1000);
 		
 		$('#lifeBottleCount').html(dashboardData[1]);
-		$('#bootleCount').html(dashboardData[2]);
+		$('#bottleCount').html(dashboardData[2]);
 		$('#customerCount').html(dashboardData[3]);
 		if(dashboardData[4] == "1"){
 			$('#internetStatus').html("Online").css("color","green");	

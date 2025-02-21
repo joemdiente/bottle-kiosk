@@ -1,38 +1,36 @@
 var errorCodeMap = [];
-errorCodeMap['coins.wait.expired'] = 'Coin slot expired';
-errorCodeMap['coin.not.inserted'] = 'Coin not inserted';
-errorCodeMap['coinslot.cancelled'] = 'Coinslot was cancelled';
-errorCodeMap['coinslot.busy'] = 'Coin slot is busy';
-errorCodeMap['coin.slot.banned'] = 'You have been banned from using coin slot, due to multiple request for insert coin, please try again later!';
-errorCodeMap['coin.slot.notavailable'] = 'Coin slot is not available as of the moment, Please try again later';
+errorCodeMap['bottles.wait.expired'] = 'Insert bottle expired';
+errorCodeMap['bottle.not.inserted'] = 'Bottle not inserted';
+errorCodeMap['insertbottle.cancelled'] = 'Bottle dispensing was cancelled';
+errorCodeMap['insertbottle.busy'] = 'Bottle dispenser is busy';
+errorCodeMap['insertbottle.banned'] = 'You have been banned from using Bottle Dispenser, due to multiple request for insert bottle, please try again later!';
+errorCodeMap['insertbottle.notavailable'] = 'Bottle dispenser is not available as of the moment, Please try again later';
 errorCodeMap['no.internet.detected'] = 'No internet connection as of the moment, Please try again later';
-var totalCoinReceived = 0;
-var insertcoinbg = new Audio('assets/insertcoinbg.mp3');
-insertcoinbg.loop = true;
-var coinCount = new Audio('assets/coin-received.mp3');
+var totalBottleReceived = 0;
+var insertbottlebg = new Audio('assets/insertbottlebg.mp3');
+insertbottlebg.loop = true;
+var bottleCount = new Audio('assets/bottle-received.mp3');
 var voucher = getStorageValue('activeVoucher');
-var insertingCoin = false;
-var TOPUP_CHARGER = "CHARGER";
+var insertingBottle = false;
 var TOPUP_INTERNET = "INTERNET";
 var topupMode = TOPUP_INTERNET;
-var chargerTimer = null;
 var rateType = "1";
 
 
 $(document).ready(function(){
   $( "#saveVoucherButton" ).prop('disabled', true);	
   $( "#cncl" ).prop('disabled', false);
-  $('#coinToast').toast({delay: 1000, animation: true});
-  $('#coinSlotError').toast({delay: 5000, animation: true});
+  $('#bottleToast').toast({delay: 1000, animation: true});
+  $('#insertbottleError').toast({delay: 5000, animation: true});
   var voucherError = false;
   
-  $('#insertCoinModal').on('hidden.bs.modal', function () {
+  $('#insertBottleModal').on('hidden.bs.modal', function () {
 		clearInterval(timer);
 		timer = null;
-		insertingCoin = false;
-		insertcoinbg.pause();
-		insertcoinbg.currentTime = 0.0;
-		if(totalCoinReceived == 0){
+		insertingBottle = false;
+		insertbottlebg.pause();
+		insertbottlebg.currentTime = 0.0;
+		if(totalBottleReceived == 0){
 			$.ajax({
 			  type: "POST",
 			  url: "http://"+vendorIpAddress+"/cancelTopUp",
@@ -60,29 +58,7 @@ $(document).ready(function(){
 		});
 	}
   
-  if(isMultiVendo){
-	  for(var i=0;i<multiVendoAddresses.length;i++){
-		  $("#vendoSelected").append($('<option>', {
-			value: multiVendoAddresses[i].vendoIp,
-			text: multiVendoAddresses[i].vendoName
-		  }));
-	  }
-	  var selectedVendo = getStorageValue('selectedVendo');
-	  if(selectedVendo != null){
-		  vendorIpAddress = selectedVendo;
-	  }
-	  $("#vendoSelected").val(vendorIpAddress);
-	  $("#vendoSelected").change(function(){
-		vendorIpAddress = $("#vendoSelected").val();
-		setStorageValue('selectedVendo', vendorIpAddress);
-		evaluateChargingButton();
-	  });
-	  
-	  $("#vendoSelected").trigger("change");
-
-  }else{
-	  $("#vendoSelectDiv").attr("style", "display: none");
-  }
+	$("#vendoSelectDiv").attr("style", "display: none");
   
   if(!dataRateOption){
 	 $("#dataInfoDiv").attr("style", "display: none");
@@ -106,15 +82,6 @@ $(document).ready(function(){
   
   if(disableVoucherInput){
 	$("#voucherInput").attr("disabled", "disabled");
-  }
-    
-  if(!chargingEnable){
-	  if(isMultiVendo){
-		evaluateChargingButton();
-	  }else{
-		$("#chargingBtn").attr("style", "display: none");
-		$("#rateTypeDiv").attr("style", "display: none");
-	  }
   }
   
   var isPaused = getStorageValue("isPaused");
@@ -140,8 +107,8 @@ $(document).ready(function(){
   }
 
   
-  var insertCoinTrigger = getStorageValue("insertCoinRefreshed");
-  if(insertCoinTrigger == "1"){
+  var insertBottleTrigger = getStorageValue("insertBottleRefreshed");
+  if(insertBottleTrigger == "1"){
 	  insertBtnAction();
   }
   
@@ -152,7 +119,7 @@ $(document).ready(function(){
 	  ignoreSaveCode = "0";
   }
   
-  if(ignoreSaveCode != "1" && insertCoinTrigger != "1" && (!voucherError) && $("#voucherInput").length > 0){
+  if(ignoreSaveCode != "1" && insertBottleTrigger != "1" && (!voucherError) && $("#voucherInput").length > 0){
 	  $.ajax({
 		  type: "GET",
 		  url: "/data/"+macNoColon+".txt?query="+new Date().getTime(),
@@ -182,20 +149,6 @@ if(voucher != ""){
 	$('#voucherInput').val(voucher);
 }
 
-function evaluateChargingButton(){
-	var style = $("#chargingBtn").attr("style");
-	$("#chargingBtn").attr("style", style+"; display: block"); 
-	$("#rateTypeDiv").attr("style", "display: block");
-	for(var i=0;i<multiVendoAddresses.length;i++){
-	  if(multiVendoAddresses[i].vendoIp == vendorIpAddress && (!multiVendoAddresses[i].chargingEnable)){
-		  style = $("#chargingBtn").attr("style");
-		  $("#chargingBtn").attr("style", style+"; display: none");
-		  $("#rateTypeDiv").attr("style", "display: none");
-		  break;
-	  }
-	}
-}
-
 function cancelPause(){
 	var r = confirm("Are you sure you want to cancel the session?");
 	if(r){
@@ -211,33 +164,28 @@ function promoBtnAction(){
 	return false;
 }
 
-function chargingBtnAction(){
-	$('#chargingModal').modal('show');
-	return false;
-}
-
 var timer = null;
 
 function insertBtnAction(){
-	var insertCoinRefreshed = getStorageValue("insertCoinRefreshed");
+	var insertBottleRefreshed = getStorageValue("insertBottleRefreshed");
 	removeStorageValue("ignoreSaveCode");
-	if(insertCoinRefreshed == null || insertCoinRefreshed == "0"){
-		setStorageValue('insertCoinRefreshed', "1");
+	if(insertBottleRefreshed == null || insertBottleRefreshed == "0"){
+		setStorageValue('insertBottleRefreshed', "1");
 		location.reload();
 	}else{
-		setStorageValue('insertCoinRefreshed', "0");
+		setStorageValue('insertBottleRefreshed', "0");
 		$("#progressDiv").attr('style','width: 100%')
 		$( "#saveVoucherButton" ).prop('disabled', true);
 		$( "#cncl" ).prop('disabled', false);
 		$("#loaderDiv").attr("class","spinner");
-		totalCoinReceived = 0;
+		totalBottleReceived = 0;
 		
-		var totalCoinReceivedSaved = getStorageValue("totalCoinReceived");
-		if(totalCoinReceivedSaved != null){
-			totalCoinReceived = totalCoinReceivedSaved;
+		var totalBottleReceivedSaved = getStorageValue("totalBottleReceived");
+		if(totalBottleReceivedSaved != null){
+			totalBottleReceived = totalBottleReceivedSaved;
 		}
 		
-		$('#totalCoin').html("0");
+		$('#totalBottle').html("0");
 		$('#totalTime').html(secondsToDhms(parseInt(0)));
 		callTopupAPI(0);
 	}
@@ -289,128 +237,16 @@ function populatePromoRates(retryCount){
 	});
 }
 
-$('#chargingModal').on('shown.bs.modal', function (e) {
-	populateChargingStations(0);
-})
-
-function populateChargingStations(retryCount){
-	clearInterval(chargerTimer);
-	chargerTimer = setInterval(refreshChargerTimer, 1000);
-	$.ajax({
-	  type: "GET",
-	  url: "http://"+vendorIpAddress+"/getChargingStation?date="+(new Date().getTime()),
-	  crossOrigin: true,
-	  contentType: 'text/plain',
-	  success: function(data){
-		var rows = data.split("|");
-		var chargingStation = "";
-		for(r in rows){
-			var columns = rows[r].split("#");
-			var curDate = new Date();
-			var targetTimestamp  = 0;
-			var pinSetting = columns[1];
-			var targetTime = parseInt(columns[3]);
-			if(targetTime > 0){
-				var targetTimeDate = new Date(targetTime * 1000);
-				if(targetTimeDate.getTime() > curDate.getTime()){
-					targetTimestamp  = targetTimeDate.getTime();
-				}
-			}
-			var style = "";
-			if(pinSetting == "-1"){
-				style = "display: none";
-			}
-			chargingStation = chargingStation + "<div class='rholder' style='"+style+"' row-type='charger-port' target-time='"+targetTimestamp+"'>";
-			chargingStation = chargingStation + "<div class='rdata'><span>Name: </span>";
-			chargingStation = chargingStation + columns[0];
-			chargingStation = chargingStation + "</div>";
-			chargingStation = chargingStation + "<div class='rdata'><span style='color: #a3a7ad'>Status: <span name='portStatus'>-";
-			chargingStation = chargingStation + "</span></span></div>";
-			chargingStation = chargingStation + "<div class='rdata'><span style='color: #a3a7ad'>Remaining: <span name='remainTime'>-";
-			chargingStation = chargingStation + "</span></span></div>";
-			chargingStation = chargingStation + "<div class='rdata'><span style='color: #a3a7ad'>";
-			chargingStation = chargingStation + "<button class='btn btn-success' style='display: none' name='useBtn' onClick=\"addChargerTime("+r+", \'"+columns[0]+"\',0)\">Avail</button>";
-			chargingStation = chargingStation + "</span></div>";
-			chargingStation = chargingStation + "</div>";
-		}
-		
-		$("#chargingBody").html(chargingStation);
-	  },error: function (jqXHR, exception) {
-		  setTimeout(function() {
-			if(retryCount < 2){
-				populateChargingStations(retryCount+1);
-			}
-		  }, 1000 );
-	  }
-	});
-}
-
-function refreshChargerTimer(){
-	$("[row-type='charger-port']").each(function () {
-       var targetTime = parseInt($(this).attr('target-time'));	
-	   var curDate = new Date();
-	   var portStatus = "Available";
-	   if(targetTime > 0){
-			if(targetTime > curDate.getTime()){
-				difference = (targetTime- curDate.getTime()) / 1000;
-				$(this).find("[name='remainTime']").html(secondsToDhms(difference));
-				portStatus = "In Use";
-			}else{
-				portStatus = "Available";
-				$(this).find("[name='useBtn']").attr('style','display: block');
-			}
-	   }else{
-		   $(this).find("[name='useBtn']").attr('style','display: block');
-	   }
-	   $(this).find("[name='portStatus']").html(portStatus);
-  });
-}
-
 function onRateTypeChange(evt){
 	rateType = $(evt).val();
 	populatePromoRates(0);
-}
-
-function addChargerTime(port, portName, retryCount){
-	topupMode = TOPUP_CHARGER;
-	$.ajax({
-	  type: "POST",
-	  url: "http://"+vendorIpAddress+"/topUp",
-	  data: "voucher="+portName+"&topupType=CHARGER&chargerPort="+port+"&mac="+mac,
-	  success: function(data){
-		$("#loaderDiv").attr("class","spinner hidden");
-		if(data.status == "true"){
-			voucher = data.voucher;
-			$('#insertCoinModal').modal('show');
-			insertingCoin = true;
-			$('#codeGeneratedBlock').attr('style', 'display: none');
-			if(timer == null){
-				timer = setInterval(checkCoin, 1000);
-			}
-			if(isMultiVendo){
-				$("#insertCoinModalTitle").html("Please insert the coin on "+$("#vendoSelected option:selected").text());
-			}
-			insertcoinbg.play();
-		}else{
-			notifyCoinSlotError(data.errorCode);
-			clearInterval(timer);
-			timer = null;
-		}
-	  },error: function (jqXHR, exception) {
-		  setTimeout(function() {
-			if(retryCount < 2){
-				addChargerTime(port, portName, retryCount+1);
-			}
-		  }, 1000 );
-	  }
-	});
 }
 
 
 function callTopupAPI(retryCount){
 	
 	var type = $( "#saveVoucherButton" ).attr('data-save-type');
-	if(type != "extend" && totalCoinReceived == 0){
+	if(type != "extend" && totalBottleReceived == 0){
 		var storedVoucher = getStorageValue('activeVoucher');
 		if(storedVoucher != null){
 			voucher = "";
@@ -428,19 +264,16 @@ function callTopupAPI(retryCount){
 		$("#loaderDiv").attr("class","spinner hidden");
 		if(data.status == "true"){
 			voucher = data.voucher;
-			$('#insertCoinModal').modal('show');
-			insertingCoin = true;
+			$('#insertBottleModal').modal('show');
+			insertingBottle = true;
 			$('#codeGenerated').html(voucher);
 			$('#codeGeneratedBlock').attr('style', 'display: none');
 			if(timer == null){
-				timer = setInterval(checkCoin, 1000);
+				timer = setInterval(checkBottle, 1000);
 			}
-			if(isMultiVendo){
-				$("#insertCoinModalTitle").html("Please insert the coin on "+$("#vendoSelected option:selected").text());
-			}
-			insertcoinbg.play();
+			insertbottlebg.play();
 		}else{
-			notifyCoinSlotError(data.errorCode);
+			notifyBottleSlotError(data.errorCode);
 			clearInterval(timer);
 			timer = null;
 		}
@@ -450,7 +283,7 @@ function callTopupAPI(retryCount){
 				callTopupAPI(retryCount+1);
 			}else{
 				$("#loaderDiv").attr("class","spinner hidden");
-				notifyCoinSlotError("coin.slot.notavailable");
+				notifyBottleSlotError("insertbottle.notavailable");
 			}
 		  }, 1000 );
 	  }
@@ -462,70 +295,60 @@ function saveVoucherBtnAction(){
 	
 	if(topupMode == TOPUP_INTERNET){
 		setStorageValue('activeVoucher', voucher);
-		removeStorageValue("totalCoinReceived");
+		removeStorageValue("totalBottleReceived");
 		$('#voucherInput').val(voucher);
 	}
 	
 	clearInterval(timer);
 	timer = null;
-	insertcoinbg.pause();
-	insertcoinbg.currentTime = 0.0;
+	insertbottlebg.pause();
+	insertbottlebg.currentTime = 0.0;
 	$.ajax({
 	  type: "POST",
 	  url: "http://"+vendorIpAddress+"/useVoucher",
 	  data: "voucher="+voucher,
 	  success: function(data){
 	
-			totalCoinReceived = 0;
+			totalBottleReceived = 0;
 			$("#loaderDiv").attr("class","spinner hidden");
 			if(data.status == "true"){
-				if(topupMode == TOPUP_CHARGER){
-					populateChargingStations();
-					$.toast({
-						  title: 'Success',
-						  content: 'Thank you for the purchase!, you can now use the service',
-						  type: 'success',
-						  delay: 3000
-					});
-				}else{
-					setStorageValue(voucher+"tempValidity", data.validity);
-					
-					$.toast({
-					  title: 'Success',
-					  content: 'Thank you for the purchase!, will do auto login shortly',
-					  type: 'success',
-					  delay: 3000
-					});
-					
-					var type = $( "#saveVoucherButton" ).attr('data-save-type');
+				setStorageValue(voucher+"tempValidity", data.validity);
+				
+				$.toast({
+					title: 'Success',
+					content: 'Thank you for the purchase!, will do auto login shortly',
+					type: 'success',
+					delay: 3000
+				});
+				
+				var type = $( "#saveVoucherButton" ).attr('data-save-type');
 
-					if(type == "extend"){
-							$.ajax({
-							  type: "POST",
-							  url: "/logout",
-							  data: "erase-cookie=true",
-							  success: function(data){
-								  setStorageValue('reLogin', '1');
-								  location.reload();
-							  }
-							 });
-					}else{
-						setTimeout(function (){
-							doLogin();
-						}, 3000);
-					}
+				if(type == "extend"){
+						$.ajax({
+							type: "POST",
+							url: "/logout",
+							data: "erase-cookie=true",
+							success: function(data){
+								setStorageValue('reLogin', '1');
+								location.reload();
+							}
+							});
+				}else{
+					setTimeout(function (){
+						doLogin();
+					}, 3000);
 				}
 			}else{
-				notifyCoinSlotError(data.errorCode);
+				notifyBottleSlotError(data.errorCode);
 			}
 		
 		
 	  },error: function (jqXHR, exception) {
 		 $("#loaderDiv").attr("class","spinner hidden");
-		 if(totalCoinReceived > 0){
+		 if(totalBottleReceived > 0){
 		    $.toast({
 			  title: 'Warning',
-			  content: 'Connect/Login failed, however coin has been process, please manually connect using this voucher: '+voucher,
+			  content: 'Connect/Login failed, however bottle has been process, please manually connect using this voucher: '+voucher,
 			  type: 'info',
 			  delay: 8000
 			});
@@ -535,16 +358,16 @@ function saveVoucherBtnAction(){
 	
 }
 
-function checkCoin(){
+function checkBottle(){
 	$.ajax({
 	  type: "POST",
-	  url: "http://"+vendorIpAddress+"/checkCoin",
+	  url: "http://"+vendorIpAddress+"/checkBottle",
 	  data: "voucher="+voucher,
 	  success: function(data){
 		
 		if(data.status == "true"){
-			totalCoinReceived = parseInt(data.totalCoin);
-			$('#totalCoin').html(data.totalCoin);	
+			totalBottleReceived = parseInt(data.totalBottle);
+			$('#totalBottle').html(data.totalBottle);	
 			$('#totalTime').html(secondsToDhms(parseInt(data.timeAdded)));
 			if(topupMode == TOPUP_INTERNET){
 				$('#codeGeneratedBlock').attr('style', 'display: block');
@@ -553,29 +376,29 @@ function checkCoin(){
 			}
 			
 			setStorageValue('activeVoucher', voucher);
-			setStorageValue('totalCoinReceived', totalCoinReceived);
+			setStorageValue('totalBottleReceived', totalBottleReceived);
 			setStorageValue(voucher+"tempValidity", data.validity);
-			notifyCoinSuccess(data.newCoin);
+			notifyBottleSuccess(data.newBottle);
 		}else{
-			if(data.errorCode == "coin.not.inserted"){
+			if(data.errorCode == "bottle.not.inserted"){
 				setStorageValue(voucher+"tempValidity", data.validity);
 				
 				var remainTime = parseInt(parseInt(data.remainTime)/1000);
 				var waitTime = parseFloat(data.waitTime);
 				var percent = parseInt(((remainTime*1000) / waitTime) * 100);
-				totalCoinReceived = parseInt(data.totalCoin);
-				if(totalCoinReceived > 0 ){
+				totalBottleReceived = parseInt(data.totalBottle);
+				if(totalBottleReceived > 0 ){
 					$( "#saveVoucherButton" ).prop('disabled', false);
 					$( "#cncl" ).prop('disabled', true);
 				}
 				if(remainTime == 0){
-					$('#insertCoinModal').modal('hide');
-					insertcoinbg.pause();
-					insertcoinbg.currentTime = 0.0;
-					if(totalCoinReceived > 0){
+					$('#insertBottleModal').modal('hide');
+					insertbottlebg.pause();
+					insertbottlebg.currentTime = 0.0;
+					if(totalBottleReceived > 0){
 						$.toast({
 						  title: 'Success',
-						  content: 'Coin slot expired!, but was able to succesfully process the coin '+totalCoinReceived +", will do auto login shortly",
+						  content: 'Bottle dispensing expired!, but was able to succesfully process the bottle '+totalBottleReceived +", will do auto login shortly",
 						  type: 'info',
 						  delay: 5000
 						});
@@ -598,34 +421,34 @@ function checkCoin(){
 							}
 						}, 3000);
 					}else{
-						notifyCoinSlotError('coins.wait.expired');
+						notifyBottleSlotError('bottles.wait.expired');
 					}
 				}else{
-					totalCoinReceived = parseInt(data.totalCoin);
-					if(totalCoinReceived > 0 ){
+					totalBottleReceived = parseInt(data.totalBottle);
+					if(totalBottleReceived > 0 ){
 						$( "#saveVoucherButton" ).prop('disabled', false);
 						$( "#cncl" ).prop('disabled', true);
 						$('#codeGeneratedBlock').attr('style', 'display: block');
 					}
-					$('#totalCoin').html(data.totalCoin);
+					$('#totalBottle').html(data.totalBottle);
 					$('#totalData').html(data.data);
 					$('#totalTime').html(secondsToDhms(parseInt(data.timeAdded)));
 					//$( "#remainingTime" ).html(remainTime);
 					$("#progressDiv").attr('style','width: '+percent+'%')
 				}
 				
-			}else if(data.errorCode == "coinslot.busy"){
+			}else if(data.errorCode == "insertbottle.busy"){
 				//when manually cleared the button
-				insertcoinbg.pause();
-				insertcoinbg.currentTime = 0.0;
+				insertbottlebg.pause();
+				insertbottlebg.currentTime = 0.0;
 				clearInterval(timer);
-				$('#insertCoinModal').modal('hide');
-				if(totalCoinReceived == 0){
-					notifyCoinSlotError("coinslot.cancelled");
+				$('#insertBottleModal').modal('hide');
+				if(totalBottleReceived == 0){
+					notifyBottleSlotError("insertbottle.cancelled");
 				}else{
 					 $.toast({
 						title: 'Success',
-						content: 'Coin slot cancelled!, but was able to succesfully process the coin '+totalCoinReceived +", will do auto login shortly",
+						content: 'Insert bottle cancelled!, but was able to succesfully process the bottle '+totalBottleReceived +", will do auto login shortly",
 						type: 'info',
 						delay: 5000
 					  });
@@ -640,7 +463,7 @@ function checkCoin(){
 					  }, 3000);
 				}
 			}else{
-				notifyCoinSlotError(data.errorCode);
+				notifyBottleSlotError(data.errorCode);
 				clearInterval(timer);
 			}
 		}
@@ -650,7 +473,7 @@ function checkCoin(){
 	});
 }
 
-function notifyCoinSlotError(errorCode){
+function notifyBottleSlotError(errorCode){
 	$.toast({
 	  title: 'Error',
 	  content: errorCodeMap[errorCode],
@@ -659,14 +482,14 @@ function notifyCoinSlotError(errorCode){
 	});
 }
 
-function notifyCoinSuccess(coin){
+function notifyBottleSuccess(bottle){
 	$.toast({
-	  title: 'Coin inserted',
-	  content: coin+' peso(s) was inserted',
+	  title: 'Bottle inserted',
+	  content: bottle+' bottle was inserted',
 	  type: 'success',
 	  delay: 2000
 	});
-	coinCount.play();
+	bottleCount.play();
 }
 
 function secondsToDhms(seconds) {

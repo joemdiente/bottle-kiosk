@@ -18,6 +18,7 @@
 #define CURRENT_VERSION "0.1"
 
 // #pragma GCC diagnostic ignored "-Wwrite-strings"
+// #define DEBUG_ESP_PORT //For Debugging Webserver
 
 #include <ESP8266TelnetClient.h>
 #include <ESP8266WiFi.h>
@@ -38,8 +39,6 @@
  * Delimiter for system.data = |
  */
 
-int TURN_OFF = 0;
-int TURN_ON = 1;
 // Start here.
 // Hardware-related settings
 volatile int SENSOR_1_ASSERT_VAL = 1;
@@ -59,23 +58,33 @@ volatile int sensor1Active = 0;
 volatile int sensor2Active = 0;
 volatile int sensor3Active = 0;
 
-//Put here your Mikrotik IP address, and login details
-IPAddress mikrotikRouterIp(192, 168, 88, 1);
+//Put here your RouterAP IP address, and login details
+IPAddress mikrotikRouterIp(10, 0, 0, 1);
+
+//RouterAP web/telnet credential
 String user = "botefi";
 String pwd = "test";
+String pwdconf = "test";
+
+//RouterAP ssd
 String ssid = "Sapientia Wifi VendoMachine";
+//RouterAP Wifi credential
 String password = "";
 String adminAuth = "";
 String vendorName = "";
 
-//Put here ESP8266 IP Address for Wifi Client
-IPAddress local_IP(192, 168, 10, 15);
-IPAddress gateway(192, 168, 10, 1);
+//Put here ESP8266 IP Address for RouterAP
+IPAddress local_IP(10, 0, 0, 100);
+IPAddress gateway(192, 168, 88, 1);
 IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(192, 168, 10, 1);  // this is optional
+IPAddress primaryDNS(192, 168, 88, 1);  // this is optional
 
-//Put here ESP8266 IP Address for Wifi Station 
-IPAddress apIP(192, 168, 88, 150);
+//Put here ESP8266 IP Address for Wifi Station (Setup)
+IPAddress apIP(192, 168, 10, 15);
+// ESP8266 Wifi Station User and PW
+String ADMIN_USER = "botefi";
+String ADMIN_PW = "test";
+String ADMIN_PW_CONF = "test";
 
 WiFiClient client2;
 WiFiClient client;
@@ -110,6 +119,15 @@ IRAM_ATTR void sensor2Asserted() {
 IRAM_ATTR void sensor3Asserted() {
   sensor3Active = 1;
 }
+
+// void ICACHE_RAM_ATTR BottleInserted()    
+// {
+//   if(isBottleDetectionActive){
+//     bottle = bottle + 1;  
+//     bottlesChange = 1;
+//   }
+// }
+
 ///////////////Unverified Code Below/////////////////////////
 
 volatile int bottle = 0;
@@ -120,11 +138,12 @@ int bottlesChange = 0;
 String currentActiveVoucher = "";
 String currentMacAttempt = "";
 int timeToAdd = 0;
-bool isBottleDetectionActive = false;
-bool acceptBottle = false;
 unsigned long targetMilis = 0;
-bool bottleExpired = false;
-bool mikrotekConnectionSuccess = false;
+
+bool isBottleDetectionActive = false;
+bool isReadyToDispense = false;
+bool isDispensingTimeoutExpired = false;
+bool mikrotikConnectionSuccess = false;
 String currentMacAddress = "";
 String currentIpAddress = "";
 String HARDWARE_TYPE = "NodeMCU v1 ESP8266";
@@ -154,9 +173,6 @@ int ratesCount = 0;
 int currentValidity = 0;
 int currentDataLimit = 0;
 String currentRateProfile = "";
-String ADMIN_USER = "";
-String ADMIN_PW = "";
-
 
 int MAX_WAIT_BOTTLE_SEC = 30000;
 int BOTTLE_INSERT_BAN_COUNT = 0;
@@ -166,10 +182,7 @@ const int WIFI_CONNECT_TIMEOUT = 180000;
 const int WIFI_CONNECT_DELAY = 500;
 
 bool networkConnected = false;
-bool cableNotConnected = false;
 bool manualVoucher = false;
-
-long lastPrinted = 0;
 
 /* Important Functions for Program Logic */
 String getContentType(String filename) {
@@ -182,7 +195,7 @@ String getContentType(String filename) {
 }
 
 bool checkIfSystemIsAvailable() {
-  if (!mikrotekConnectionSuccess) {
+  if (!mikrotikConnectionSuccess) {
     String keys[] = { "status", "errorCode" };
     String values[] = { "false", "insert.bottle.notavailable" };
     setupCORSPolicy();
@@ -277,7 +290,7 @@ void checkBottle() {
     return;
   }
 
-  if (bottleExpired) {
+  if (isDispensingTimeoutExpired) {
     String keys[] = { "status", "errorCode" };
     String values[] = { "false", "bottles.wait.expired" };
     setupCORSPolicy();
@@ -285,7 +298,7 @@ void checkBottle() {
     return;
   }
 
-  if (!acceptBottle) {
+  if (!isReadyToDispense) {
     totalBottle += processBottle;
     timeToAdd = calculateAddTime();
     String keys[] = { "status", "newBottle", "timeAdded", "totalBottle", "validity", "data" };
@@ -357,7 +370,7 @@ void useVoucher() {
   String values[] = { "true", totalBottleStr, timeToAddStr, validityStr };
   resetGlobalVariables();
   setupCORSPolicy();
-  acceptBottle = false;
+  isReadyToDispense = false;
   server.send(200, "application/json", toJson(keys, values, 4));
 }
 
@@ -475,7 +488,9 @@ boolean checkMacAddress(String mac) {
 void enableBottleDetection() {
   delay(200);
   processBottle = 0;
-  acceptBottle = true;
+
+  //Ready to Dispense Bottle
+  isReadyToDispense = true;
   isBottleDetectionActive = true;
   targetMilis = millis() + MAX_WAIT_BOTTLE_SEC;
 }
@@ -633,7 +648,7 @@ int calculateAddTime() {
 }
 void handleSystemAbnormal() {
   Serial.println("AP disconnected!!!!!!!!!!!!!!!");
-  mikrotekConnectionSuccess = false;
+  mikrotikConnectionSuccess = false;
 
   //Reconnect after 30 seconds
   delay(30000);
@@ -730,12 +745,12 @@ void populateSystemConfiguration() {
   // Mikrotik/Router
   user = rows[10];
   pwd = rows[11];
-  //confpwd = rows[12]; // Unsure
+  pwdconf = rows[12];
 
   // WebGUI Admin Username and Password
   ADMIN_USER = rows[13];
   ADMIN_PW = rows[14];
-  //confadminpwd = rows[15];
+  ADMIN_PW_CONF = rows[15];
   adminAuth = base64::encode(ADMIN_USER + ":" + ADMIN_PW);
 
   CHECK_INTERNET_CONNECTION = rows[16].toInt();
@@ -857,15 +872,42 @@ void loginMirotik() {
   delay(3000);
 
   //PUT HERE YOUR USERNAME/PASSWORD
-  mikrotekConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
-  if (mikrotekConnectionSuccess) {
-    Serial.println("Login to mikrotek router success");
-  } else {
-    //Temporary fix for those cannot connect to mikrotik
-    mikrotekConnectionSuccess = true;
-    Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
-  }
+  mikrotikConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
+  if (mikrotikConnectionSuccess) {
+      Serial.println("Login to mikrotek router success");
+    } else {
+      //Temporary fix for those cannot connect to mikrotik
+      mikrotikConnectionSuccess = true;
+      Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
+      Serial.println("Note: Just ignore due to race condition with checking of prompt.");
+    }
 }
+/*
+ * Wifi-related Functions
+ */
+void checkSTAConnection() {
+  wl_status_t status = WiFi.status();
+
+  switch (status) {
+    case WL_CONNECTED:
+      Serial.println("STA: Connected");
+      Serial.print("STA RSSI: ");
+      Serial.print(WiFi.RSSI());
+      Serial.println(" dBm");
+      break;
+    case WL_DISCONNECTED:
+    case WL_CONNECT_FAILED:
+    case WL_NO_SSID_AVAIL:
+      Serial.println("STA: Disconnected or Connection Failed");
+      // You might want to attempt reconnection here:
+      // WiFi.begin(ssid_sta, password_sta);
+      break;
+    default:
+      Serial.print("STA: Other Status: ");
+      Serial.println(status);
+      break;
+  }
+} //End of Wifi-related functions
 /*
  *  EEPROM Handling Functions
  */
@@ -1061,7 +1103,7 @@ void handleAdminDashboard() {
     data += String("0");
   }
   data += String("|");
-  if (mikrotekConnectionSuccess) {
+  if (mikrotikConnectionSuccess) {
     data += String("1");
   } else {
     data += String("0");
@@ -1184,6 +1226,9 @@ void backupSystemConfig() {
 
 void handleNotFound() {
   Serial.println("preflight....");
+  Serial.print("Request: ");
+  Serial.print(server.hostHeader());
+  Serial.println(server.uri());
   if (server.method() == HTTP_OPTIONS) {
     Serial.println("Preflight request....");
     server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -1293,10 +1338,11 @@ void setup() {
 
   // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
 
   //for static ip configuration
   if (IP_ADDRESS_MODE == 1) { //Static instead of DHCP
-    Serial.print("[Wifi Client] Using static ip address");
+    Serial.print("[Wifi Client] Using static ip address ");
     Serial.println(local_IP);
     WiFi.config(local_IP, primaryDNS, gateway, subnet);
   }
@@ -1340,10 +1386,10 @@ void setup() {
     Serial.print("Mac address: ");
     Serial.println(currentMacAddress);
     Serial.println("Connecting.... ");
-    Serial.print("Attaching interrupt ");
+    Serial.println("Attaching interrupt ");
 
     //Attach Interrupt Here
-    attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
+    // attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
     // attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2Asserted, RISING);
     // attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3Asserted, RISING);
     loginMirotik();
@@ -1367,8 +1413,9 @@ void setup() {
     
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    WiFi.softAP("Sapientia Wifi Setup");
+    WiFi.softAP("Sapientia Wifi Initial Setup");
 
+    Serial.printf("Connect to Initial Setup, use browser and type %s\r\n",apIP);
     //if DNSServer is started with "*" for domain name, it will reply with
     //provided IP to all DNS request
     dnsServer.start(DNS_PORT, "*", apIP);
@@ -1377,6 +1424,7 @@ void setup() {
       server.sendHeader("Location", String("/admin"), true);
       server.send(302, "text/plain", "");
     });
+    Serial.println("Started Initial Setup Wifi");
   } //End of Soft AP setup
 
   // Webserver Setup for both Wifi Mode. (Means always available to user)
@@ -1398,7 +1446,7 @@ void setup() {
 
   server.begin();
 
-  if (mikrotekConnectionSuccess) {
+  if (mikrotikConnectionSuccess) {
     Serial.println("RouterAP Connected Successfully!");
     digitalWrite(DEBUGLED_1_PIN, HIGH);
   } 
@@ -1411,27 +1459,12 @@ void setup() {
 int _test_init = 1;
 void loop() {
 
-  if(_test_init) {
-    Serial.print("Entered loop()");
-    _test_init = 0;
-  }
-
-  while(1) {
-  server.handleClient();
-  MDNS.update();
-  if (sensor1Active)
-  {
-    Serial.printf("Sensor 1 Activated at %s\r\n", __FUNCTION__);
-    sensor1Active = 0;
-  }
-  };
-  //
   if (networkConnected) {
     unsigned long currentMilis = millis();
 
     //handling for disconnection of AP
     bool linkStatusOff = false;
-
+    // checkSTAConnection();    //Debugging Only
     if (!client.connected() || linkStatusOff) {
       handleSystemAbnormal();
       server.handleClient();
@@ -1439,23 +1472,22 @@ void loop() {
     }
 
     //insert Bottle logic
-    if (acceptBottle) {
+    if (isReadyToDispense) {
+
+      Serial.println("ReadyToDispense");
+      
       if ((targetMilis > currentMilis)) {
-        bottleExpired = false;
-        //wait for the bottle to insert
+        isDispensingTimeoutExpired = false;
+        //wait for the dispensing (bottlesChange will increment on Interrupt)
         if (bottlesChange > 0) {
-          if (bottleWaiting == 0) {
-            bottleWaiting = currentMilis + 700;
-          }
-          if (bottleWaiting > currentMilis) {
-          }
-          bottleWaiting = 0;
-          processBottle = bottle;
-          bottle -= processBottle;
+
+          // processBottle = bottle;
+          // bottle -= processBottle;
+
           Serial.print("Bottle inserted: ");
           Serial.println(processBottle);
           bottlesChange = 0;
-          acceptBottle = false;
+          isReadyToDispense = false;
 
           //if manual voucher mode
           if (manualVoucher) {
@@ -1466,8 +1498,8 @@ void loop() {
         }
       } else {
         disableBottleDetection();
-        acceptBottle = false;
-        bottleExpired = true;
+        isReadyToDispense = false;
+        isDispensingTimeoutExpired = true;
         manualVoucher = false;
         timeToAdd = calculateAddTime();
         //Auto add time no need to use voucher
@@ -1492,11 +1524,15 @@ void loop() {
     if (SETUP_FINISH == 1) {
       //when setup is already finish and cannnot connect, wait for 10 mins to setup and will auto restart after that
       //this is to cater slow boot AP
+      Serial.println("Network Not Connected Restarting AP!");
       if (currentMilis >= 600000) {
         ESP.restart();
       }
     }
     dnsServer.processNextRequest();
   }
+  
+  server.handleClient();
+  MDNS.update();
 }
 /* End of loop() */
