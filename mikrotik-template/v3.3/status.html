@@ -21,34 +21,6 @@
 </head>
 <body id="loginBody">
 
-<!-- Messenger Chat plugin Code -->
-    <div id="fb-root"></div>
-
-    <!-- Your Chat plugin code -->
-    <div id="fb-customer-chat" class="fb-customerchat">
-    </div>
-
-    <script>
-      var chatbox = document.getElementById('fb-customer-chat');
-      chatbox.setAttribute("page_id", "108240834062058");
-      chatbox.setAttribute("attribution", "biz_inbox");
-
-      window.fbAsyncInit = function() {
-        FB.init({
-          xfbml            : true,
-          version          : 'v12.0'
-        });
-      };
-
-      (function(d, s, id) {
-        var js, fjs = d.getElementsByTagName(s)[0];
-        if (d.getElementById(id)) return;
-        js = d.createElement(s); js.id = id;
-        js.src = 'https://connect.facebook.net/en_US/sdk/xfbml.customerchat.js';
-        fjs.parentNode.insertBefore(js, fjs);
-      }(document, 'script', 'facebook-jssdk'));
-    </script>
-
 <div class="container">
 <center>
 		<form action="$(link-logout)" name="logout" >
@@ -114,7 +86,7 @@
 						<div class="info-title"><img src="assets/img/data.png" width="20px" height="20px" /><span> Data Usage</span></div>
 						<div style="display: inline-block"><img src="assets/img/upload.png" width="20px" height="20px" /><span style="font-size: 16px; font-weight: bold; text-shadow: 1px 1px 3px #000">$(bytes-in-nice)</span></div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
 						<div style="display: inline-block"><img src="assets/img/download.png" width="20px" height="20px" /><span style="font-size: 16px; font-weight: bold; text-shadow: 1px 1px 3px #000">$(bytes-out-nice)</span></div>
-						<div class="inscoinholder" id="dataInfoDiv2">
+						<div class="insbottleholder" id="dataInfoDiv2">
 							<span id="totalDataInfo" style="font-size: 20px; font-weight: bold; color: #ffffff">$(remain-bytes-total-nice)</span><br>
 							<span style="color: #ffffff">Remaining Data</span>
 						</div>
@@ -137,14 +109,13 @@
 					<br>
 					<button type="button" id="pauseTimeBtn" onClick="pause(); return false" class="btn btn-danger btn-block" style="display: block; width: 100%; color: #fff; text-shadow: 0px 1px 2px #000;">PAUSE TIME</button>
 					<br>
-					<button type="button" id="chargingBtn" onclick="chargingBtnAction(); return false" class="btn btn-secondary" style="display: block; width: 100%; color: #fff; text-shadow: 0px 1px 2px #000;">CHARGING STATION</button>
 					<div style="margin-top: 18px"></div>
 			
-					<div class="modal fade" id="insertCoinModal" style="z-index: 1500" data-backdrop="static" data-keyboard="false" tabindex="-1" role="dialog" aria-labelledby="insertCoinModalTitle" aria-hidden="true">
+					<div class="modal fade" id="insertBottleModal" style="z-index: 1500" data-backdrop="static" data-keyboard="false" tabindex="-1" role="dialog" aria-labelledby="insertBottleModalTitle" aria-hidden="true">
 					  <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
 						<div class="modal-content">
 						  <div class="modal-header">
-							<h5 class="modal-title" id="insertCoinModalTitle">Please insert the coin</h5>
+							<h5 class="modal-title" id="insertBottleModalTitle">Please insert the bottle</h5>
 							<button type="button" class="close" data-dismiss="modal" aria-label="Close">
 							  <span aria-hidden="true">&times;</span>
 							</button>
@@ -154,21 +125,21 @@
 									<div id="progressDiv" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100" style="width: 100%"></div>
 								</div>
 								
-								<div class="inscoin">
+								<div class="insbottle">
 								<center>
-								<div class="inscoinholder" style="border: 2px solid #576574; padding: 5px; height: 90px; border-radius: 3px">
+								<div class="insbottleholder" style="border: 2px solid #576574; padding: 5px; height: 90px; border-radius: 3px">
 								<span style="color: #747d8c">Your code is</span><br>
 								<span id="codeGeneratedBlock">
 									<span id="codeGenerated" style="font-size: 35px; font-weight: bold; color: #4cd137">*****</span>
 								</span>
 								</div>
 								
-								<div class="inscoinholder">
-								<span id="totalCoin" style="font-size: 20px; font-weight: bold; color: #fff">0</span><span style="font-size: 20px; font-weight: bold; color: #fff">.00 Php</span><br>
-								<span style="color: #747d8c">Coin</span>
+								<div class="insbottleholder">
+								<span id="totalBottle" style="font-size: 20px; font-weight: bold; color: #fff">0</span><span style="font-size: 20px; font-weight: bold; color: #fff">.00 Php</span><br>
+								<span style="color: #747d8c">Bottle</span>
 								</div>
 								
-								<div class="inscoinholder">
+								<div class="insbottleholder">
 								<span id="totalTime" style="font-size: 20px; font-weight: bold; color: #fff"></span><br>
 								<span style="color: #747d8c">Time</span>
 								</div>						
@@ -201,7 +172,6 @@
 								<label for="rateType" class="rate-title"><b>Rate Type</b></label>
 								<select name="rateType" class="form-control" id="rateType" onChange="onRateTypeChange(this)">
 								  <option value="1">Internet</option>
-								  <option value="2">Charging</option>
 								</select>
 								</div>
 							</center>
@@ -218,33 +188,11 @@
 					  </div>
 					</div>
 					
-					<div class="modal fade" id="chargingModal" tabindex="1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
-					  <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
-						<div class="modal-content">
-						  <div class="modal-header">
-							<h5 class="modal-title" id="exampleModalLabel">Charging Station</h5>
-							<button type="button" class="close" data-dismiss="modal" aria-label="Close">
-							  <span aria-hidden="true" style="color: #fff">&times;</span>
-							</button>
-						  </div>
-						  <div class="modal-body">
-							<center>	
-							<div id="chargingBody"></div>
-							</center>
-						  </div>
-						  <div class="modal-footer">
-							<button type="button" class="btn btn-danger" data-dismiss="modal">Close</button>
-						  </div>
-						</div>
-					  </div>
-					</div>
 
                 </div>
 				
 			<div class="footer">
-					<span class="footers">
-					Powered by: <a href="https://www.facebook.com/groups/1172413279934139">JuanFi System v3.3</a> &copy; All rights reserved 2021<br>
-					
+					<span class="footers">					
 					</span>				
 				</div>
             </div>	
@@ -362,7 +310,7 @@
 				
 				$(if refresh-timeout)
 					setInterval(function(){
-						if(!insertingCoin){
+						if(!insertingBottle){
 							location.reload();
 						}
 					}, $(refresh-timeout-secs) * 1000);
