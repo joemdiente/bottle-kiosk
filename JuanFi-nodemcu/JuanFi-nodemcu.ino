@@ -1415,6 +1415,7 @@ void setup() {
   servo1.attach(SERVO_1_PIN, 500, 2500, 0);
 
   //Debugging Only
+  Serial.println("Run Test Servo");
   MG995Rotate(servo1, 500, MG995_CLOCKWISE);
   MG995Rotate(servo1, 500, MG995_ANTICLOCKWISE);
 
