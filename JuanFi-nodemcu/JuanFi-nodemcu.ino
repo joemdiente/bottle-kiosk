@@ -1,5 +1,5 @@
 /*
- * Sapientia Wifi VendoMachine (Fork of JuanFi)
+ * Sapientia Wifi VendoMachine (Fork of JuanFi, https://github.com/ivanalayan15/JuanFi)
  * No Copyright Infringment Intended
  * 
  * Using NodeMCU ESP8266, Servo, Distance Sensor and Mikrotik Router
@@ -15,11 +15,21 @@
 */
 
 //increase always when publishing a new version for tracking
-#define CURRENT_VERSION "0.1"
+#define CURRENT_VERSION "0.2"
+
+/* Debugging Utilities */
+//Use for debugging application
+#define APPLICATION_DEBUG_MODE 1
+
+#if (APPLICATION_DEBUG_MODE)
+#define APP_DEBUG_PRINT(fmt, ...) Serial.printf(fmt "\r\n", ##__VA_ARGS__)
+#else
+  #define APP_DEBUG_PRINT(fmt, ...)
+#endif
 
 // #pragma GCC diagnostic ignored "-Wwrite-strings"
-// #define DEBUG_ESP_PORT //For Debugging Webserver
-
+#define DEBUG_ESP_PORT
+#define DEBUG_ESP_HTTP_CLIENT
 #include <ESP8266TelnetClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -33,6 +43,7 @@
 #include <EEPROM.h>
 #include <FS.h>
 #include <base64.h>
+#include <Servo.h>
 
 /* 
  * Delimiter for rates.data = #
@@ -40,23 +51,22 @@
  */
 
 // Start here.
-// Hardware-related settings
-volatile int SENSOR_1_ASSERT_VAL = 1;
-volatile int SENSOR_2_ASSERT_VAL = 1;
-volatile int SENSOR_3_ASSERT_VAL = 1;
 int SENSOR_1_PIN = D6;
 int SENSOR_2_PIN = D7;
 int SENSOR_3_PIN = D3;
-int SERVO_1_PIN = D8;
+int SERVO_1_PIN = D1;
 int SERVO_1_CW_VAL = 120;     //servo1ClockwiseVal
 int SERVO_1_ACW_VAL = 120;    //servo1AntiClockwiseVal
-int DEBUGLED_1_PIN = D4;      //Yellow LED 
-int DEBUGLED_2_PIN = D5;      //Green  LED
+int DEBUGLED_1_PIN = D0;      //Green LED 
+int DEBUGLED_2_PIN = D5;
 
-// Main Sensor-Bottle Logic Variables
-volatile int sensor1Active = 0;
-volatile int sensor2Active = 0;
-volatile int sensor3Active = 0;
+/* 
+ * When triggering ALL sensors, their assertion in hardware.
+ * Add a delay before checking each interrupt assertion value.
+ * Can be adjusted.
+ * Can also be seen as de-bouncer.
+ */
+long DELAY_BEFORE_READING_SENSORS_ASSERT_VAL = 20; 
 
 //Put here your RouterAP IP address, and login details
 IPAddress mikrotikRouterIp(10, 0, 0, 1);
@@ -109,17 +119,57 @@ const int CUSTOMER_COUNT_ADDRESS = 10;
 const int RANDOM_MAC_ADDRESS = 15;
 const int BACKUP_CONFIG_LENGTH_INDEX = 20;
 
-//Sensors ISR
-IRAM_ATTR void sensor1Asserted() {
-  sensor1Active = 1;
+
+/* 
+ * Sensors ISR
+ */
+//For single tracking
+volatile bool isSensorsTriggered = false;
+//For individual tracking
+volatile int isSensor1Activated = 0;
+volatile int isSensor2Activated = 0;
+volatile int isSensor3Activated = 0;
+
+// Hardware-related settings
+int SENSOR_1_ASSERT_VAL = 1;
+int SENSOR_2_ASSERT_VAL = 1;
+int SENSOR_3_ASSERT_VAL = 1;
+
+IRAM_ATTR void sensor1ISR() {
+  isSensorsTriggered = true;
+  isSensor1Activated = SENSOR_1_ASSERT_VAL;
 }
-IRAM_ATTR void sensor2Asserted() {
-  sensor2Active = 1;
+IRAM_ATTR void sensor2ISR() {
+  isSensorsTriggered = true;
+  isSensor2Activated = SENSOR_2_ASSERT_VAL;
 }
-IRAM_ATTR void sensor3Asserted() {
-  sensor3Active = 1;
+IRAM_ATTR void sensor3ISR() {
+  isSensorsTriggered = true;
+  isSensor3Activated = SENSOR_3_ASSERT_VAL;
 }
 
+void sensorsClearISRFlags() {
+  //Clear Flags
+  isSensorsTriggered = false;
+  isSensor1Activated = !SENSOR_1_ASSERT_VAL;
+  isSensor2Activated = !SENSOR_2_ASSERT_VAL;
+  isSensor3Activated = !SENSOR_3_ASSERT_VAL;
+}
+void sensorsInterruptAttach()
+{
+  sensorsClearISRFlags();
+  // attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1ISR, CHANGE);  //Comment for now since sensor 1 is not working
+  attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2ISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3ISR, CHANGE);
+}
+void sensorsInterruptDetach()
+{
+  sensorsClearISRFlags();
+  // attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN));  //Comment for now since sensor 1 is not working
+  detachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN));
+  detachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN));
+}
+// Old ISR
 // void ICACHE_RAM_ATTR BottleInserted()    
 // {
 //   if(isBottleDetectionActive){
@@ -127,12 +177,12 @@ IRAM_ATTR void sensor3Asserted() {
 //     bottlesChange = 1;
 //   }
 // }
-
+/* End of ISR related Functions */
 ///////////////Unverified Code Below/////////////////////////
 
-volatile int bottle = 0;
-volatile int processBottle = 0;
-volatile int totalBottle = 0;
+int bottle = 0;
+int processBottle = 0;
+int totalBottle = 0;
 boolean isNewVoucher = false;
 int bottlesChange = 0;
 String currentActiveVoucher = "";
@@ -182,18 +232,53 @@ const int WIFI_CONNECT_TIMEOUT = 180000;
 const int WIFI_CONNECT_DELAY = 500;
 
 bool networkConnected = false;
-bool manualVoucher = false;
+
+/* Dispenser Control + M995-related Functions */
+Servo servo1;  // create servo object to control a servo
+enum {
+  MG995_CLOCKWISE = 0,
+  MG995_ANTICLOCKWISE
+} MG995_Direction;
+int MG995Rotate (Servo &servo_obj, int distanceTime, int direction)
+{
+  if(direction == MG995_CLOCKWISE) {
+    servo_obj.write(0); //Rotate Clockwise
+  } else if (direction == MG995_ANTICLOCKWISE) {
+    servo_obj.write(180); //Rotate Anti Clockwise
+  }
+  delay(distanceTime);
+  servo_obj.write(91); //Stop
+  return 1;
+}
+// For now opening dispenser will rotate servo clockwise
+bool isDispenserOpen = 0;
+bool openDispenser() {
+  if (!isDispenserOpen) {
+    //Open Dispenser
+    MG995Rotate(servo1, SERVO_1_CW_VAL, MG995_CLOCKWISE);
+    isDispenserOpen = true;
+    return true;
+  }
+  else {
+    APP_DEBUG_PRINT("Dispenser is already open.");
+    return false;
+  }
+}
+bool closeDispenser() {
+  if (isDispenserOpen) {
+    //Close Dispenser
+    MG995Rotate(servo1, SERVO_1_ACW_VAL, MG995_CLOCKWISE);
+    isDispenserOpen = false;
+    return true;
+  }
+  else {
+    APP_DEBUG_PRINT("Dispenser is still closed.");
+    return false;
+  }
+}
+/* End of Dispenser Control + M995-related Function */
 
 /* Important Functions for Program Logic */
-String getContentType(String filename) {
-  if (filename.endsWith(".html")) return "text/html";
-  else if (filename.endsWith(".css")) return "text/css";
-  else if (filename.endsWith(".js")) return "application/javascript";
-  else if (filename.endsWith(".ico")) return "image/x-icon";
-  else if (filename.endsWith(".gz")) return "application/x-gzip";
-  return "text/plain";
-}
-
 bool checkIfSystemIsAvailable() {
   if (!mikrotikConnectionSuccess) {
     String keys[] = { "status", "errorCode" };
@@ -204,6 +289,15 @@ bool checkIfSystemIsAvailable() {
   } else {
     return true;
   }
+}
+
+void handleSystemAbnormal() {
+  Serial.println("AP disconnected!!!!!!!!!!!!!!!");
+  mikrotikConnectionSuccess = false;
+
+  //Reconnect after 30 seconds
+  delay(30000);
+  ESP.restart();
 }
 
 // Check Internet Connection
@@ -234,7 +328,7 @@ bool hasInternetConnect() {
 }
 
 void addAttemptToInsertBottle() {
-  if (BOTTLE_INSERT_BAN_COUNT > 0 && (!manualVoucher)) {
+  if (BOTTLE_INSERT_BAN_COUNT > 0) {
     int currentMacIndex = -1;
     int availableIndex = -1;
     for (int i = 0; i < attemptedMaxCount; i++) {
@@ -398,13 +492,14 @@ bool validateVoucher(String voucher) {
   }
 }
 
-void topUp() {
-  manualVoucher = false;
+void topUp() { 
+  //Internet Connection Check
   bool hasInternetConnection = true;
   if (CHECK_INTERNET_CONNECTION == 1) {
     hasInternetConnection = hasInternetConnect();
   }
   if (!hasInternetConnection) {
+    APP_DEBUG_PRINT("No Internet Connection");
     String keys[] = { "status", "errorCode" };
     String values[] = { "false", "no.internet.detected" };
     setupCORSPolicy();
@@ -412,12 +507,14 @@ void topUp() {
     return;
   }
 
+  //Check if RouterAP is connected
   if (!checkIfSystemIsAvailable()) {
     Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
     return;
   }
 
   String macAdd = server.arg("mac");
+  //Check if MAC Address is BANNED. 
   if (!checkMacAddress(macAdd)) {
     String keys[] = { "status", "errorCode" };
     String values[] = { "false", "insert.bottle.banned" };
@@ -437,7 +534,7 @@ void topUp() {
     isNewVoucher = true;
   } else {
     if (isNewVoucher && voucher == currentActiveVoucher) {
-      isNewVoucher = true;
+      isNewVoucher = true;  //??? isNewVoucher will stay the same. Maybe remove isNewVoucher from if()?
     } else {
       isNewVoucher = false;
     }
@@ -477,22 +574,13 @@ boolean checkMacAddress(String mac) {
           if (attempted[i].attemptCount >= BOTTLE_INSERT_BAN_COUNT) {
             isValid = false;
             Serial.print(mac);
-            Serial.println(" mac address currenly banned");
+            Serial.println(" mac address currently banned");
           }
         }
       }
     }
   }
   return isValid;
-}
-void enableBottleDetection() {
-  delay(200);
-  processBottle = 0;
-
-  //Ready to Dispense Bottle
-  isReadyToDispense = true;
-  isBottleDetectionActive = true;
-  targetMilis = millis() + MAX_WAIT_BOTTLE_SEC;
 }
 
 String generateVoucher() {
@@ -573,24 +661,6 @@ void setupCORSPolicy() {
   server.sendHeader("Access-Control-Allow-Headers", "*");
   server.sendHeader("Access-Control-Allow-Credentials", "false");
 }
-
-String toJson(String keys[], String values[], int nField) {
-  String json = "{";
-
-  for (int i = 0; i < nField; i++) {
-    if (i > 0) {
-      json += ",";
-    }
-    json += " \"";
-    json += String(keys[i]);
-    json += "\": \"";
-    json += String(values[i]);
-    json += "\" ";
-  }
-  json += "}";
-  return json;
-}
-
 void resetGlobalVariables() {
   currentActiveVoucher = "";
   timeToAdd = 0;
@@ -599,8 +669,25 @@ void resetGlobalVariables() {
   currentRateProfile = "";
 }
 
+void enableBottleDetection() {
+  delay(200);
+  processBottle = 0;
+
+  //Ready to Dispense Bottle
+  isReadyToDispense = true;
+  isBottleDetectionActive = true;
+
+  //Enable Interrupt 
+  sensorsInterruptAttach();
+  if(!isDispenserOpen) openDispenser();
+  targetMilis = millis() + MAX_WAIT_BOTTLE_SEC;
+}
 void disableBottleDetection() {
   isBottleDetectionActive = false;
+
+  //Remove Interrupt 
+  sensorsInterruptDetach();
+  closeDispenser();
 }
 
 int calculateAddTime() {
@@ -646,14 +733,91 @@ int calculateAddTime() {
   }
   return totalTime * 60;
 }
-void handleSystemAbnormal() {
-  Serial.println("AP disconnected!!!!!!!!!!!!!!!");
-  mikrotikConnectionSuccess = false;
 
-  //Reconnect after 30 seconds
-  delay(30000);
-  ESP.restart();
+void handleGenerateVouchers() {
+
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+  int amount = server.arg("amt").toInt();
+  int qty = server.arg("qty").toInt();
+  int addToSales = server.arg("sales").toInt();
+  String prefix = server.arg("pfx");
+  String voucherGenerated = "";
+
+  for (int i = 0; i < qty; i++) {
+    int randomNumber = random(1000, 9999);
+    String voucher = prefix + String(randomNumber);
+    totalBottle = amount;
+    timeToAdd = calculateAddTime();
+    registerNewVoucher(voucher);
+    if (addToSales == 1) {
+      updateStatisticToEE();
+    }
+    addTimeToVoucher(voucher, timeToAdd);
+    if (i > 0) {
+      voucherGenerated += "#";
+    }
+    voucherGenerated += voucher;
+  }
+  String returnData = vendorName + "|" + amount + "|" + String(timeToAdd) + "|" + voucherGenerated;
+  server.send(200, "text/pain", returnData);
 }
+
+void loginMirotik() {
+
+  //WHICH CHARACTER SHOULD BE INTERPRETED AS "PROMPT"?
+  tc.setPromptChar('>');
+
+  //this is to trigger manually the login
+  //since it could be a problem to attach the serial monitor while negotiating with the server (it cause the board reset)
+  //remove it or replace it with a delay/wait of a digital input in case you're not using the serial monitors
+  Serial.print("Logging in to mikrotik ");
+  Serial.print(mikrotikRouterIp);
+  Serial.print(" using ");
+  Serial.print(user);
+  Serial.print(" / ");
+  Serial.println(pwd);
+  delay(3000);
+
+  //PUT HERE YOUR USERNAME/PASSWORD
+  mikrotikConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
+  if (mikrotikConnectionSuccess) {
+      Serial.println("Login to mikrotek router success");
+    } else {
+      //Temporary fix for those cannot connect to mikrotik
+      mikrotikConnectionSuccess = true;
+      Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
+      Serial.println("Note: Just ignore due to race condition with checking of prompt.");
+    }
+}
+
+void populateRates() {
+
+  Serial.println("Loading promo rates");
+  String data = readFile("/admin/config/rates.data");
+  Serial.print("Data: ");
+  Serial.println(data);
+  int dataLength = data.length() + 1;
+  char dataChar[dataLength];
+  String rows[100];
+  ratesCount = split(rows, data, '|');
+
+  for (int i = 0; i < ratesCount; i++) {
+    Serial.print("Data: ");
+    Serial.println(rows[i]);
+    String column[6];
+    split(column, rows[i], '#');
+    rates[i].rateName = column[0];
+    rates[i].price = column[1].toInt();
+    rates[i].minutes = (column[2]).toInt();
+    rates[i].validity = (column[3]).toInt();
+    rates[i].dataLimit = (column[4]).toInt();
+    rates[i].profileName = column[5];
+  }
+}
+
 void populateSystemConfiguration() {
   //Read atleast 4 bytes on system.data offset in EEPROM
   int backupLength = eeGetInt(BACKUP_CONFIG_LENGTH_INDEX);
@@ -772,115 +936,6 @@ void populateSystemConfiguration() {
   DEBUGLED_1_PIN = rows[30].toInt();
 
   /* End parse system.data */
-}
-
-bool activateManualVoucherPurchase() {
-  bool hasInternetConnection = true;
-  if (CHECK_INTERNET_CONNECTION == 1) {
-    hasInternetConnection = hasInternetConnect();
-  }
-  if (!hasInternetConnection) {
-    Serial.printf("[%s] No Internet Connection.\r\n", __FUNCTION__);
-    return false;
-  }
-
-  if (!checkIfSystemIsAvailable()) {
-    Serial.printf("[%s] System Unavailable.\r\n", __FUNCTION__);
-    return false;
-  }
-
-  currentMacAttempt = currentMacAddress;
-  currentValidity = 0;
-  isNewVoucher = true;
-  resetGlobalVariables();
-  enableBottleDetection();
-  currentActiveVoucher = generateVoucher();
-  manualVoucher = true;
-  //show 30 sec the voucher code
-  return true;
-}
-
-void handleGenerateVouchers() {
-
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-  int amount = server.arg("amt").toInt();
-  int qty = server.arg("qty").toInt();
-  int addToSales = server.arg("sales").toInt();
-  String prefix = server.arg("pfx");
-  String voucherGenerated = "";
-
-  for (int i = 0; i < qty; i++) {
-    int randomNumber = random(1000, 9999);
-    String voucher = prefix + String(randomNumber);
-    totalBottle = amount;
-    timeToAdd = calculateAddTime();
-    registerNewVoucher(voucher);
-    if (addToSales == 1) {
-      updateStatisticToEE();
-    }
-    addTimeToVoucher(voucher, timeToAdd);
-    if (i > 0) {
-      voucherGenerated += "#";
-    }
-    voucherGenerated += voucher;
-  }
-  String returnData = vendorName + "|" + amount + "|" + String(timeToAdd) + "|" + voucherGenerated;
-  server.send(200, "text/pain", returnData);
-}
-
-void populateRates() {
-
-  Serial.println("Loading promo rates");
-  String data = readFile("/admin/config/rates.data");
-  Serial.print("Data: ");
-  Serial.println(data);
-  int dataLength = data.length() + 1;
-  char dataChar[dataLength];
-  String rows[100];
-  ratesCount = split(rows, data, '|');
-
-  for (int i = 0; i < ratesCount; i++) {
-    Serial.print("Data: ");
-    Serial.println(rows[i]);
-    String column[6];
-    split(column, rows[i], '#');
-    rates[i].rateName = column[0];
-    rates[i].price = column[1].toInt();
-    rates[i].minutes = (column[2]).toInt();
-    rates[i].validity = (column[3]).toInt();
-    rates[i].dataLimit = (column[4]).toInt();
-    rates[i].profileName = column[5];
-  }
-}
-void loginMirotik() {
-
-  //WHICH CHARACTER SHOULD BE INTERPRETED AS "PROMPT"?
-  tc.setPromptChar('>');
-
-  //this is to trigger manually the login
-  //since it could be a problem to attach the serial monitor while negotiating with the server (it cause the board reset)
-  //remove it or replace it with a delay/wait of a digital input in case you're not using the serial monitors
-  Serial.print("Logging in to mikrotik ");
-  Serial.print(mikrotikRouterIp);
-  Serial.print(" using ");
-  Serial.print(user);
-  Serial.print(" / ");
-  Serial.println(pwd);
-  delay(3000);
-
-  //PUT HERE YOUR USERNAME/PASSWORD
-  mikrotikConnectionSuccess = tc.login(mikrotikRouterIp, user.c_str(), pwd.c_str());
-  if (mikrotikConnectionSuccess) {
-      Serial.println("Login to mikrotek router success");
-    } else {
-      //Temporary fix for those cannot connect to mikrotik
-      mikrotikConnectionSuccess = true;
-      Serial.println("Warning, Failed to login in mikrotek router, please check mikrotik log");
-      Serial.println("Note: Just ignore due to race condition with checking of prompt.");
-    }
 }
 /*
  * Wifi-related Functions
@@ -1005,8 +1060,35 @@ String readFile(String path) {
 /* 
  * Webserver Handling Functions
  */
+void handleAdminPage() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
 
- void handleJquerySript() {
+  handleFileRead("/admin/system-config.html");
+}
+
+void handleAdminGeneratedVoucherPage() {
+  if (!isAuthorized()) {
+    handleNotAuthorize();
+    return;
+  }
+
+  handleFileRead("/admin/voucher-generate.html");
+}
+
+void handleHealth() {
+  setupCORSPolicy();
+  server.send(200, "text/plain", "ok");
+}
+
+void handleLogout() {
+  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
+  server.send(401, "text/html", "<html>Authentication failed</html>");
+}
+
+void handleJquerySript() {
   handleFileRead("/admin/js/jquery.min.js");
 }
 
@@ -1120,26 +1202,6 @@ void handleAdminDashboard() {
   server.send(200, "text/plain", data);
 }
 
-void handleAdminPage() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  handleFileRead("/admin/system-config.html");
-}
-
-void handleAdminGeneratedVoucherPage() {
-  if (!isAuthorized()) {
-    handleNotAuthorize();
-    return;
-  }
-
-  handleFileRead("/admin/voucher-generate.html");
-}
-
-
-
 bool isAuthorized() {
   String auth = server.header("Authorization");
   String expectedAuth = "Basic " + adminAuth;
@@ -1242,15 +1304,6 @@ void handleNotFound() {
   }
 }
 
-void handleHealth() {
-  setupCORSPolicy();
-  server.send(200, "text/plain", "ok");
-}
-
-void handleLogout() {
-  server.sendHeader("WWW-Authenticate", "Basic realm=\"Secure\"");
-  server.send(401, "text/html", "<html>Authentication failed</html>");
-}
 
 void testInsertBottle() {
   if (!isAuthorized()) {
@@ -1287,7 +1340,31 @@ void handleCancelTopUp() {
  * Miscellanous Functions
  * These do not affect primary logic of the code.
  */
+ String getContentType(String filename) {
+  if (filename.endsWith(".html")) return "text/html";
+  else if (filename.endsWith(".css")) return "text/css";
+  else if (filename.endsWith(".js")) return "application/javascript";
+  else if (filename.endsWith(".ico")) return "image/x-icon";
+  else if (filename.endsWith(".gz")) return "application/x-gzip";
+  return "text/plain";
+}
 
+ String toJson(String keys[], String values[], int nField) {
+  String json = "{";
+
+  for (int i = 0; i < nField; i++) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += " \"";
+    json += String(keys[i]);
+    json += "\": \"";
+    json += String(values[i]);
+    json += "\" ";
+  }
+  json += "}";
+  return json;
+}
 // split() for tokenization of data
 int split(String rows[], String data, char delimeter) {
   int count = 0;
@@ -1324,17 +1401,25 @@ void setup() {
     Serial.println("An Error has occurred while mounting LittleFS");
     return;
   }
-  populateSystemConfiguration();
 
+  //Setup Hardware
   pinMode(SENSOR_1_PIN, INPUT_PULLUP);
   pinMode(SENSOR_2_PIN, INPUT_PULLUP);
-  pinMode(SENSOR_3_PIN, INPUT_PULLUP);
+  // pinMode(SENSOR_3_PIN, INPUT_PULLUP);
   pinMode(DEBUGLED_1_PIN, OUTPUT);
   pinMode(DEBUGLED_2_PIN, OUTPUT);
   pinMode(SERVO_1_PIN, OUTPUT);
-
-  //Debug Only
   digitalWrite(DEBUGLED_1_PIN, HIGH);
+
+  //Servo Control
+  servo1.attach(SERVO_1_PIN, 500, 2500, 0);
+
+  //Debugging Only
+  MG995Rotate(servo1, 500, MG995_CLOCKWISE);
+  MG995Rotate(servo1, 500, MG995_ANTICLOCKWISE);
+
+  //Putting this here is for debugging only. Should be added above "Setup Hardware"
+  populateSystemConfiguration();
 
   // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
@@ -1389,9 +1474,9 @@ void setup() {
     Serial.println("Attaching interrupt ");
 
     //Attach Interrupt Here
-    // attachInterrupt(digitalPinToInterrupt(SENSOR_1_PIN), sensor1Asserted, CHANGE);
-    // attachInterrupt(digitalPinToInterrupt(SENSOR_2_PIN), sensor2Asserted, RISING);
-    // attachInterrupt(digitalPinToInterrupt(SENSOR_3_PIN), sensor3Asserted, RISING);
+    sensorsInterruptAttach();
+
+    //Access RouterAP via Telnet
     loginMirotik();
 
     if (MDNS.begin("esp8266")) {
@@ -1456,7 +1541,6 @@ void setup() {
 /*
  * loop()
  */
-int _test_init = 1;
 void loop() {
 
   if (networkConnected) {
@@ -1471,37 +1555,67 @@ void loop() {
       return;
     }
 
-    //insert Bottle logic
+    /* 
+     * isReadyToDispense is set to True at enableBottleDetection();
+     * This function is called in the following scenarios:
+     * 1. checkBottle (from /checkBottle URL)
+     * 2. topUp (from /topUp URL)
+     */
     if (isReadyToDispense) {
 
-      Serial.println("ReadyToDispense");
-      
+      /* 
+        * Initially the dispenser is closed. Make sure that the dispenser is closed actually at startup. 
+        * Check if Dispenser is close; This is a software tracker.
+        */ 
+      if(!isDispenserOpen) openDispenser();
+
+      // targetMilis will have value at enableBottleDetection() and handleCanceltopUp()
       if ((targetMilis > currentMilis)) {
         isDispensingTimeoutExpired = false;
-        //wait for the dispensing (bottlesChange will increment on Interrupt)
-        if (bottlesChange > 0) {
+        
+        if (isSensorsTriggered == 1) {
+          // APP_DEBUG_PRINT("SensorsTriggered");
+          delay(DELAY_BEFORE_READING_SENSORS_ASSERT_VAL);
 
-          // processBottle = bottle;
-          // bottle -= processBottle;
+          // APP_DEBUG_PRINT("Sensor values 1:%d 2:%d 3: %d\r\n",isSensor1Activated, isSensor2Activated, isSensor3Activated);
+          isSensorsTriggered = 0;
 
-          Serial.print("Bottle inserted: ");
-          Serial.println(processBottle);
-          bottlesChange = 0;
-          isReadyToDispense = false;
+          if(isSensor2Activated && isSensor3Activated) { // && isSensor1Activated) but sensor 1 is not working
+            APP_DEBUG_PRINT("All Sensors Activated");
+            
+            //Bottle was detected
+            bottle += 1;
+            bottlesChange = 1;
+            //'Clear' Flags (Clearing depends on the assertion val) 
+            sensorsClearISRFlags();
 
-          //if manual voucher mode
-          if (manualVoucher) {
-            totalBottle += processBottle;
-            timeToAdd = calculateAddTime();
-            enableBottleDetection();
+            // Bottle was inserted and here.
+            if (bottlesChange > 0) {
+              //Not necessary or maybe need to implement differently.
+              processBottle = bottle;  
+              bottle -= processBottle;
+
+              Serial.print("Bottle inserted: ");
+              Serial.println(processBottle);
+              bottlesChange = 0;
+              isReadyToDispense = false;
+            }
           }
         }
-      } else {
+      }
+      /* 
+       * Will surely go here on the next iteration after doing above
+       */ 
+      else {
+        APP_DEBUG_PRINT("Dispense Timeout Expired");
+
+        isDispensingTimeoutExpired = true;
         disableBottleDetection();
         isReadyToDispense = false;
-        isDispensingTimeoutExpired = true;
-        manualVoucher = false;
+
+        //Calculate bottles to time and return time.
         timeToAdd = calculateAddTime();
+
         //Auto add time no need to use voucher
         if (timeToAdd > 0) {
           clearAttemptToInsertBottle(); 
@@ -1517,14 +1631,19 @@ void loop() {
         }
         resetGlobalVariables();
       }
-    } else {
     }
+    //Clear flags (If not ready to dispense)
+    isSensorsTriggered = 0;
+    isSensor1Activated = !SENSOR_1_ASSERT_VAL;
+    isSensor2Activated = !SENSOR_2_ASSERT_VAL;
+    isSensor3Activated = !SENSOR_3_ASSERT_VAL; 
   } else {
     unsigned long currentMilis = millis();
+
     if (SETUP_FINISH == 1) {
       //when setup is already finish and cannnot connect, wait for 10 mins to setup and will auto restart after that
       //this is to cater slow boot AP
-      Serial.println("Network Not Connected Restarting AP!");
+      Serial.println("Network Not Connected Restarting ESP!");
       if (currentMilis >= 600000) {
         ESP.restart();
       }
