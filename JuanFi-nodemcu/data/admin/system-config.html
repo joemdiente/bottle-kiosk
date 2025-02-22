@@ -513,9 +513,9 @@ function myFunction() {
 	<div class="panel">
 	<span class="title">Voucher Generation</span>
 	<label for="voucherGeneratePrefix"><b>Voucher Prefix(max 2, should start with Letters)</b></label><br>
-    <input type="text" value="VC" placeholder="Voucher Prefix, e.g. P, S" id="voucherGeneratePrefix" maxlength="2" required>
+    <input type="text" value="BF" placeholder="Voucher Prefix, e.g. P, S" id="voucherGeneratePrefix" maxlength="2" required>
 	<label for="voucherAmount"><b>Voucher Amount</b></label><br>
-    <input type="number" value="50" placeholder="Voucher amount" id="voucherAmount" required>
+    <input type="number" value="1" placeholder="Voucher amount" id="voucherAmount" required>
 	<label for="voucherQty"><b>Quantity(PC)</b></label><br>
     <input type="number" value="1" placeholder="Voucher Qty" id="voucherQty"  required>
 	<label for="addToSales"><b>Add to Sales</b></label><br>
@@ -526,7 +526,6 @@ function myFunction() {
 	<label for="appendToPrevious"><b>Append to Previous(For printing purpose)</b></label><br>
     <select name="appendToPrevious" id="appendToPrevious">
 	  <option value="0">No</option>
-	  <option value="1">Yes</option>
 	</select>
 	<label>After you click the generate voucher, a popup window will appear after the generation, please check if you have popup blocker! Please avoid also qty to be more than 15 since it will take time to generate.</label><br>
 	</div>
@@ -968,7 +967,7 @@ function generateVoucher(){
 	  success: function(data){
 	  
 		var voucherData = localStorage.getItem("voucherData");
-		
+
 		if(appendToPrevious == "1"){
 			if(voucherData != null){
 				voucherData += "~";
