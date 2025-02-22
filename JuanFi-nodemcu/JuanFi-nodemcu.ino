@@ -267,7 +267,7 @@ bool openDispenser() {
 bool closeDispenser() {
   if (isDispenserOpen) {
     //Close Dispenser
-    MG995Rotate(servo1, SERVO_1_ACW_VAL, MG995_CLOCKWISE);
+    MG995Rotate(servo1, SERVO_1_ACW_VAL, MG995_ANTICLOCKWISE);
     isDispenserOpen = false;
     return true;
   }
@@ -1402,6 +1402,10 @@ void setup() {
     return;
   }
 
+  //Get Stored System Configuration (in EEPROM)
+  //This will overwrite the default values in this .ino file.
+  populateSystemConfiguration();
+
   //Setup Hardware
   pinMode(SENSOR_1_PIN, INPUT_PULLUP);
   pinMode(SENSOR_2_PIN, INPUT_PULLUP);
@@ -1419,8 +1423,6 @@ void setup() {
   MG995Rotate(servo1, 500, MG995_CLOCKWISE);
   MG995Rotate(servo1, 500, MG995_ANTICLOCKWISE);
 
-  //Putting this here is for debugging only. Should be added above "Setup Hardware"
-  populateSystemConfiguration();
 
   // We start by connecting to a WiFi network
   WiFi.mode(WIFI_STA);
